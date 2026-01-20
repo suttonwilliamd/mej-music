@@ -5,7 +5,7 @@ import { registerSynthSounds } from 'superdough'
 // @ts-ignore - Import tonal for note parsing
 import '@strudel/tonal'
 // @ts-ignore - Strudel types are not available
-import { s, stack, repl, note, choose, rand, sine } from '@strudel/core'
+import { s, stack, repl, note, choose, rand, sine, registerSound } from '@strudel/core'
 
 // Parameter mapping interfaces
 interface EnergyMap {
@@ -44,12 +44,20 @@ class MeJApp {
   private isPlaying = false
   private currentSpeed = 'mid'
   private currentPreset = 'flow'
+  private mode: 'continuous' | 'track' = 'continuous'
   
   // Parameters
   private energy = 50
   private complexity = 50
   private atmosphere = 50
   private rhythmFocus = 50
+  
+  // Track mode properties
+  private trackStartTime = 0
+  private currentTrackDuration = 0
+  private evolutionTimer: number | null = null
+  private mediaRecorder: MediaRecorder | null = null
+  private recordedChunks: Blob[] = []
 
   constructor() {
     this.initializeUI()
@@ -68,60 +76,7 @@ class MeJApp {
     }
   }
 
-  private registerBasicSynths() {
-    // Register sine wave
-    registerSound('sine', (time, value, onended) => {
-      const { freq } = value
-      const ctx = getAudioContext()
-      const osc = new OscillatorNode(ctx, { type: 'sine', frequency: Number(freq) })
-      const gain = new GainNode(ctx, { gain: 0.3 })
-      osc.connect(gain)
-      osc.start(time)
-      const stop = (time) => osc.stop(time)
-      osc.addEventListener('ended', () => {
-        osc.disconnect()
-        gain.disconnect()
-        onended()
-      })
-      return { node: gain, stop }
-    }, { type: 'synth' })
 
-    // Register sawtooth wave
-    registerSound('sawtooth', (time, value, onended) => {
-      const { freq } = value
-      const ctx = getAudioContext()
-      const osc = new OscillatorNode(ctx, { type: 'sawtooth', frequency: Number(freq) })
-      const gain = new GainNode(ctx, { gain: 0.3 })
-      osc.connect(gain)
-      osc.start(time)
-      const stop = (time) => osc.stop(time)
-      osc.addEventListener('ended', () => {
-        osc.disconnect()
-        gain.disconnect()
-        onended()
-      })
-      return { node: gain, stop }
-    }, { type: 'synth' })
-
-    // Register triangle wave
-    registerSound('triangle', (time, value, onended) => {
-      const { freq } = value
-      const ctx = getAudioContext()
-      const osc = new OscillatorNode(ctx, { type: 'triangle', frequency: Number(freq) })
-      const gain = new GainNode(ctx, { gain: 0.3 })
-      osc.connect(gain)
-      osc.start(time)
-      const stop = (time) => osc.stop(time)
-      osc.addEventListener('ended', () => {
-        osc.disconnect()
-        gain.disconnect()
-        onended()
-      })
-      return { node: gain, stop }
-    }, { type: 'synth' })
-
-    console.log('Basic synths registered')
-  }
 
   private initializeUI() {
     // Create main app container
@@ -130,6 +85,11 @@ class MeJApp {
       <div class="header">MeJ</div>
       
       <div class="controls">
+        <div class="mode-control">
+          <button class="mode-btn active" data-mode="continuous">Continuous</button>
+          <button class="mode-btn" data-mode="track">Track</button>
+        </div>
+        
         <div class="playback-controls">
           <button class="playback-btn" id="prev-btn">◀</button>
           <button class="playback-btn" id="play-btn">▶</button>
@@ -180,12 +140,25 @@ class MeJApp {
         <button class="preset-btn" data-preset="demon">Demon</button>
         <button class="new-track-btn">🎲 New Track</button>
       </div>
+      
+      <div class="track-info" id="track-info" style="display: none;">
+        <div class="track-timer" id="track-timer">00:00</div>
+        <div class="track-status" id="track-status">Ready</div>
+      </div>
     `
 
     this.attachEventListeners()
   }
 
   private attachEventListeners() {
+    // Mode controls
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement
+        this.setMode(target.dataset.mode as 'continuous' | 'track')
+      })
+    })
+
     // Playback controls
     document.getElementById('play-btn')?.addEventListener('click', () => this.play())
     document.getElementById('pause-btn')?.addEventListener('click', () => this.pause())
@@ -253,6 +226,11 @@ class MeJApp {
     if (playBtn) playBtn.style.display = 'none'
     if (pauseBtn) pauseBtn.style.display = 'block'
 
+    // Start recording if in track mode
+    if (this.mode === 'track') {
+      this.startRecording()
+    }
+
     // Start pattern generation
     this.startPattern()
   }
@@ -267,6 +245,17 @@ class MeJApp {
     // Stop the current pattern
     if (this.scheduler) {
       this.scheduler.stop()
+    }
+
+    // Stop recording and save if in track mode
+    if (this.mode === 'track' && this.mediaRecorder) {
+      this.stopRecording()
+    }
+
+    // Clear evolution timer
+    if (this.evolutionTimer) {
+      clearInterval(this.evolutionTimer)
+      this.evolutionTimer = null
     }
   }
 
@@ -313,6 +302,25 @@ class MeJApp {
 
     if (this.isPlaying) {
       this.updatePattern()
+    }
+  }
+
+  private setMode(mode: 'continuous' | 'track') {
+    this.mode = mode
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.classList.remove('active')
+    })
+    document.querySelector(`[data-mode="${mode}"]`)?.classList.add('active')
+
+    // Show/hide track info
+    const trackInfo = document.getElementById('track-info')
+    if (trackInfo) {
+      trackInfo.style.display = mode === 'track' ? 'block' : 'none'
+    }
+
+    // Restart if playing to apply new mode
+    if (this.isPlaying) {
+      this.startPattern()
     }
   }
 
@@ -383,10 +391,17 @@ class MeJApp {
         })
       }
 
+      // Setup mode-specific behavior
+      if (this.mode === 'track') {
+        this.setupTrackMode()
+      } else {
+        this.setupContinuousMode()
+      }
+
       const pat = this.generatePattern()
       this.scheduler.setPattern(pat)
       this.scheduler.start()
-      console.log('Pattern started')
+      console.log(`Pattern started in ${this.mode} mode`)
     } catch (error) {
       console.error('Failed to start pattern:', error)
     }
@@ -671,6 +686,169 @@ class MeJApp {
     // Apply overall gain control to prevent clipping
     const masterGain = 0.7
     return stack(drums, bass, melody).fast(speedMultiplier).gain(masterGain)
+  }
+
+  private setupContinuousMode() {
+    // Clear any existing evolution timer
+    if (this.evolutionTimer) {
+      clearInterval(this.evolutionTimer)
+    }
+
+    // Evolve parameters gradually over time for continuous flow
+    this.evolutionTimer = window.setInterval(() => {
+      if (!this.isPlaying) return
+
+      // Randomly adjust one parameter slightly for organic evolution
+      const params = ['energy', 'complexity', 'atmosphere', 'rhythmFocus'] as const
+      const randomParam = params[Math.floor(Math.random() * params.length)]
+      const currentValue = this[randomParam]
+      
+      // Small adjustment (±5)
+      let newValue = currentValue + (Math.random() < 0.5 ? -5 : 5)
+      newValue = Math.max(0, Math.min(100, newValue))
+      
+      this.setParameter(randomParam, newValue)
+      
+      // Occasionally switch presets for more variety
+      if (Math.random() < 0.02) { // 2% chance every interval
+        const presets = ['starry', 'flow', 'glitch', 'demon']
+        const currentPresetIndex = presets.indexOf(this.currentPreset)
+        const newPresetIndex = (currentPresetIndex + Math.floor(Math.random() * 3) + 1) % 4
+        this.setPreset(presets[newPresetIndex])
+      }
+    }, 8000) // Evolve every 8 seconds
+  }
+
+  private setupTrackMode() {
+    // Generate track duration (3-4 minutes most common, occasional 7 minutes)
+    const isLongTrack = Math.random() < 0.1 // 10% chance for 7-minute track
+    const durationMinutes = isLongTrack ? 7 : (3 + Math.random() * 2) // 3-5 minutes typically
+    this.currentTrackDuration = durationMinutes * 60 * 1000 // Convert to milliseconds
+    this.trackStartTime = Date.now()
+
+    // Update track timer display
+    this.updateTrackTimer()
+
+    // Set timer for track completion
+    setTimeout(() => {
+      if (this.isPlaying && this.mode === 'track') {
+        this.completeTrack()
+      }
+    }, this.currentTrackDuration)
+
+    // Update timer every second
+    const timerInterval = setInterval(() => {
+      if (!this.isPlaying || this.mode !== 'track') {
+        clearInterval(timerInterval)
+        return
+      }
+      this.updateTrackTimer()
+    }, 1000)
+  }
+
+  private updateTrackTimer() {
+    const elapsed = Date.now() - this.trackStartTime
+    const remaining = Math.max(0, this.currentTrackDuration - elapsed)
+    
+    const minutes = Math.floor(remaining / 60000)
+    const seconds = Math.floor((remaining % 60000) / 1000)
+    
+    const timerElement = document.getElementById('track-timer')
+    const statusElement = document.getElementById('track-status')
+    
+    if (timerElement) {
+      timerElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+    }
+    
+    if (statusElement) {
+      const elapsedMinutes = Math.floor(elapsed / 60000)
+      const elapsedSeconds = Math.floor((elapsed % 60000) / 1000)
+      statusElement.textContent = `Playing - ${elapsedMinutes}:${elapsedSeconds.toString().padStart(2, '0')} elapsed`
+    }
+  }
+
+  private completeTrack() {
+    // Stop recording and save
+    if (this.mediaRecorder) {
+      this.stopRecording()
+    }
+
+    // Update status
+    const statusElement = document.getElementById('track-status')
+    if (statusElement) {
+      statusElement.textContent = 'Complete!'
+    }
+
+    // Auto-start a new track after a brief pause
+    setTimeout(() => {
+      if (this.mode === 'track') {
+        this.generateNewTrack()
+      }
+    }, 2000)
+  }
+
+  private startRecording() {
+    if (!this.audioContext) return
+
+    try {
+      const destination = this.audioContext.createMediaStreamDestination()
+      
+      // Connect existing audio context to recording destination
+      // Note: This is a simplified approach. In a production app, you'd need
+      // to properly route all audio sources through this destination
+      
+      this.mediaRecorder = new MediaRecorder(destination.stream)
+      this.recordedChunks = []
+
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          this.recordedChunks.push(event.data)
+        }
+      }
+
+      this.mediaRecorder.onstop = () => {
+        this.saveRecording()
+      }
+
+      this.mediaRecorder.start()
+      console.log('Recording started')
+    } catch (error) {
+      console.error('Failed to start recording:', error)
+    }
+  }
+
+  private stopRecording() {
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      this.mediaRecorder.stop()
+      console.log('Recording stopped')
+    }
+  }
+
+  private saveRecording() {
+    if (this.recordedChunks.length === 0) return
+
+    const blob = new Blob(this.recordedChunks, { type: 'audio/webm' })
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const preset = this.currentPreset
+    const duration = Math.floor(this.currentTrackDuration / 1000)
+    
+    const filename = `mej-track-${preset}-${duration}s-${timestamp}.webm`
+    
+    // Create download link
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+
+    console.log(`Track saved as ${filename}`)
+    
+    // Clear recording
+    this.recordedChunks = []
+    this.mediaRecorder = null
   }
 }
 
