@@ -7,36 +7,282 @@ import '@strudel/tonal'
 // @ts-ignore - Strudel types are not available
 import { s, stack, repl, note, choose, rand, sine, registerSound } from '@strudel/core'
 
-// Parameter mapping interfaces
-interface EnergyMap {
-  density: number
-  speed: number
-  gain: number
-  degrade: number
+// Musical Foundation System
+interface PresetMusicalConfig {
+  key: string
+  scale: string
+  chordProgression: string[]
+  bpmRange: [number, number]
+  genre: string
 }
 
-interface ComplexityMap {
-  layers: number
-  polyrhythm: boolean
-  effects: boolean
-  variation: number
-  randomness: string
+const PRESET_MUSICAL_CONFIG: Record<string, PresetMusicalConfig> = {
+  starry: {
+    key: "A:minor",
+    scale: "A:pentatonic",
+    chordProgression: ["Am", "F", "C", "G"],
+    bpmRange: [70, 90],
+    genre: "ambient"
+  },
+  flow: {
+    key: "C:major",
+    scale: "C:pentatonic", 
+    chordProgression: ["C", "G", "Am", "F"],
+    bpmRange: [80, 100],
+    genre: "lofi"
+  },
+  glitch: {
+    key: "D:minor",
+    scale: "D:blues",
+    chordProgression: ["Dm", "G", "Am", "E"],
+    bpmRange: [120, 140],
+    genre: "idm"
+  },
+  demon: {
+    key: "E:minor",
+    scale: "E:phrygian",
+    chordProgression: ["Em", "C", "G", "D"],
+    bpmRange: [130, 150],
+    genre: "industrial"
+  }
 }
 
-interface AtmosphereMap {
-  reverb: number
-  release: number
-  filter: { lpf?: number; lpq?: number }
-  decay: number
-  pad: boolean
+interface DrumPattern {
+  kick: string
+  snare: string
+  hihat: string
+  percussion?: string
 }
 
-interface RhythmMap {
-  euclidean: boolean
-  pulse: number
-  swing: boolean
-  subdivision: number
+class MusicalPatternLibrary {
+  static getDrumPattern(preset: string, _energy: number): DrumPattern {
+    const basePatterns: Record<string, DrumPattern> = {
+      starry: {
+        kick: "bd ~ ~ ~",
+        snare: "~ ~ sd ~", 
+        hihat: "hh*8",
+        percussion: "~ ~ ~ cp"
+      },
+      flow: {
+        kick: "bd sd ~ sd",
+        snare: "~ sd ~ ~",
+        hihat: "hh*16",
+        percussion: "cp*4 ~ ~ ~"
+      },
+      glitch: {
+        kick: "bd*2 ~ bd sd",
+        snare: "sd*4 ~ ~ ~",
+        hihat: "hh*32",
+        percussion: "cp*8 sd*4 ~ ~"
+      },
+      demon: {
+        kick: "bd bd bd bd",
+        snare: "sd ~ sd ~",
+        hihat: "hh*16",
+        percussion: "cp*4 bd*4 ~ ~"
+      }
+    }
+    
+    return basePatterns[preset] || basePatterns.flow
+  }
+
+  static getBassPattern(preset: string, key: string, _energy: number): any {
+    // Use key parameter to avoid TypeScript warning
+    console.log(`Bass pattern using key: ${key}`)
+    
+    const bassPatterns: Record<string, any> = {
+      starry: note("a1 ~ ~ ~").scale(key).s("sawtooth").attack(2).sustain(4).lpf(100).gain(0.2),
+      flow: note("c1 ~ g1 ~").scale(key).s("sawtooth").attack(0.1).sustain(0.4).lpf(600).gain(0.4),
+      glitch: note("d1 ~ a1 ~").scale(key).s("sawtooth").fm(4).fmh(2).lpf(800).lpq(10).attack(0.01).gain(0.5),
+      demon: note("e1 ~ e1 ~").scale(key).s("sawtooth").fm(8).fmh(1.5).lpf(400).lpq(15).distort(3).attack(0.01).gain(0.8)
+    }
+    
+    return bassPatterns[preset] || bassPatterns.flow
+  }
+
+  static getChordPattern(preset: string, key: string, _atmosphere: number): any {
+    const progression = PRESET_MUSICAL_CONFIG[preset]?.chordProgression || ["C", "G", "Am", "F"]
+    const chordPattern = note(`<${progression.join(' ')}>`).scale(key)
+    
+    const chordStyles: Record<string, any> = {
+      starry: chordPattern.s("sine").voicing().attack(3).sustain(8).release(4).room(0.8).size(0.9).dry(0.2).lpf(800).lpq(3).gain(0.3),
+      flow: chordPattern.s("sawtooth").voicing().attack(0.1).sustain(2).release(0.5).room(0.4).sometimesBy(0.2, (x: any) => x.crush(12)).gain(0.4),
+      glitch: chordPattern.s("square").voicing().fast(2).attack(0.01).release(0.1).lpf(2000).lpq(5).sometimesBy(0.3, (x: any) => x.crush(8)).gain(0.3),
+      demon: chordPattern.s("sawtooth").voicing().attack(0.01).sustain(0.5).distort(2).lpf(500).lpq(8).gain(0.5)
+    }
+    
+    return chordStyles[preset] || chordStyles.flow
+  }
+
+  static getMelodyPattern(preset: string, key: string, _complexity: number): any {
+    const scale = PRESET_MUSICAL_CONFIG[preset]?.scale || "C:pentatonic"
+    
+    const melodyPatterns: Record<string, any> = {
+      starry: note("0 [4 7] [12 7] 4").scale(scale).s("triangle").attack(0.5).release(2).gain(0.2).sometimesBy(0.3, (x: any) => x.delay(0.5)).pan(sine.slow(8)),
+      flow: note("0 4 7 ~").scale(scale).s("triangle").fast(2).attack(0.05).release(0.3).gain(0.3).pan(sine.slow(4)),
+      glitch: note("[0 2 4 7] [7 4 2 0]").scale(scale).s("square").fast(4).sometimesBy(0.3, (x: any) => x.fast(8)).sometimesBy(0.2, (x: any) => x.reverse()).gain(0.3),
+      demon: note("0 3 6 ~").scale(scale).s("square").distort(3).attack(0.001).release(0.05).gain(0.4)
+    }
+    
+    return melodyPatterns[preset] || melodyPatterns.flow
+  }
 }
+
+// Song Structure System for Track Mode
+class SongStructureManager {
+  private sections = ['intro', 'verse', 'chorus', 'verse', 'chorus', 'outro']
+  private currentSectionIndex = 0
+  private sectionCounter = 0
+  private sectionLength = 8 // cycles per section
+  private preset: string
+
+  constructor(preset: string) {
+    this.preset = preset
+  }
+
+  getCurrentPattern(): any {
+    const currentSection = this.sections[this.currentSectionIndex]
+    
+    switch(currentSection) {
+      case 'intro':
+        return this.generateIntro()
+      case 'verse': 
+        return this.generateVerse()
+      case 'chorus':
+        return this.generateChorus()
+      case 'outro':
+        return this.generateOutro()
+      default:
+        return this.generateVerse()
+    }
+  }
+
+  private generateIntro(): any {
+    const config = PRESET_MUSICAL_CONFIG[this.preset]
+    // Sparse version of main groove
+    return stack(
+      s("bd ~ ~ ~").gain(0.4).room(0.3).orbit(1),
+      MusicalPatternLibrary.getBassPattern(this.preset, config.key, 30).gain(0.3).orbit(2),
+      MusicalPatternLibrary.getChordPattern(this.preset, config.key, 50).gain(0.2).orbit(3)
+    )
+  }
+
+  private generateVerse(): any {
+    const config = PRESET_MUSICAL_CONFIG[this.preset]
+    const drumPattern = MusicalPatternLibrary.getDrumPattern(this.preset, 50)
+    
+    // Main groove with elements
+    return stack(
+      s(drumPattern.kick).gain(0.6).orbit(1),
+      s(drumPattern.snare).gain(0.5).orbit(2),
+      s(drumPattern.hihat).gain(0.3).orbit(3),
+      MusicalPatternLibrary.getBassPattern(this.preset, config.key, 50).orbit(4),
+      MusicalPatternLibrary.getChordPattern(this.preset, config.key, 50).gain(0.4).orbit(5),
+      MusicalPatternLibrary.getMelodyPattern(this.preset, config.key, 50).gain(0.3).orbit(6)
+    )
+  }
+
+  private generateChorus(): any {
+    const config = PRESET_MUSICAL_CONFIG[this.preset]
+    const drumPattern = MusicalPatternLibrary.getDrumPattern(this.preset, 80)
+    
+    // Full arrangement - higher energy
+    return stack(
+      s(drumPattern.kick).gain(1.2).orbit(1),
+      s(drumPattern.snare).gain(1.1).orbit(2),
+      s(drumPattern.hihat).gain(1.3).orbit(3),
+      MusicalPatternLibrary.getBassPattern(this.preset, config.key, 80).lpf(600).gain(1.3).orbit(4),
+      MusicalPatternLibrary.getChordPattern(this.preset, config.key, 80).attack(0.1).gain(1.4).orbit(5),
+      MusicalPatternLibrary.getMelodyPattern(this.preset, config.key, 80).fast(1.2).gain(1.5).orbit(6),
+      // Extra pad layer in chorus
+      note("a2").s("sine").attack(2).sustain(4).room(0.6).gain(0.2).orbit(7)
+    )
+  }
+
+  private generateOutro(): any {
+    const config = PRESET_MUSICAL_CONFIG[this.preset]
+    // Fade out
+    return stack(
+      s("bd ~ ~ ~").gain(0.2).degradeBy(0.5).orbit(1),
+      MusicalPatternLibrary.getChordPattern(this.preset, config.key, 30).attack(4).gain(0.2).orbit(2)
+    )
+  }
+
+  advanceSection(): void {
+    this.sectionCounter++
+    if (this.sectionCounter >= this.sectionLength) {
+      this.currentSectionIndex = (this.currentSectionIndex + 1) % this.sections.length
+      this.sectionCounter = 0
+    }
+  }
+
+  getCurrentSectionName(): string {
+    return this.sections[this.currentSectionIndex]
+  }
+}
+
+// Continuous Evolution System
+class ContinuousEvolutionManager {
+  private evolutionStage = 0
+  private currentChordIndex = 0
+  private preset: string
+
+  constructor(preset: string) {
+    this.preset = preset
+  }
+
+  getEvolvingPattern(): any {
+    const config = PRESET_MUSICAL_CONFIG[this.preset]
+    
+    // Slowly evolve parameters
+    const energyModulation = 0.5 + (Math.sin(this.evolutionStage) * 0.3)
+    const complexityModulation = 0.5 + (Math.cos(this.evolutionStage * 0.7) * 0.3)
+    
+    // Change chords slowly
+    if (Math.floor(this.evolutionStage) % 32 === 0) {
+      this.currentChordIndex = (this.currentChordIndex + 1) % config.chordProgression.length
+    }
+    
+    return this.generateEvolvingPattern(config, energyModulation, complexityModulation)
+  }
+
+  private generateEvolvingPattern(config: PresetMusicalConfig, energyMod: number, complexityMod: number): any {
+    const drumPattern = MusicalPatternLibrary.getDrumPattern(this.preset, energyMod * 100)
+    
+    return stack(
+      s(drumPattern.kick).gain(0.5 + energyMod * 0.5).orbit(1),
+      s(drumPattern.snare).gain(0.4 + energyMod * 0.4).orbit(2),
+      s(drumPattern.hihat).gain(0.3 + complexityMod * 0.3).orbit(3),
+      MusicalPatternLibrary.getBassPattern(this.preset, config.key, energyMod * 100).orbit(4),
+      this.getEvolvingChords(config).orbit(5),
+      this.getEvolvingMelody(config, complexityMod).orbit(6)
+    )
+  }
+
+  private getEvolvingChords(config: PresetMusicalConfig): any {
+    const currentChord = config.chordProgression[this.currentChordIndex]
+    // Use config.key in scale
+    return note(currentChord).scale(config.key).s("sine").voicing()
+      .attack(2).sustain(6).release(3)
+      .room(0.6).gain(0.3)
+  }
+
+  private getEvolvingMelody(config: PresetMusicalConfig, complexity: number): any {
+    const melodicDensity = complexity > 0.7 ? 2 : 1
+    // Use config.key and config.scale
+    return note("0 [4 7] ~").scale(config.scale).s("triangle")
+      .fast(melodicDensity)
+      .attack(0.1).release(0.5)
+      .gain(0.2 + complexity * 0.2)
+      .pan(sine.slow(8))
+  }
+
+  evolve(): void {
+    this.evolutionStage += 0.01
+  }
+}
+
+
 
 class MeJApp {
   private audioContext: AudioContext | null = null
@@ -50,7 +296,7 @@ class MeJApp {
   private energy = 50
   private complexity = 50
   private atmosphere = 50
-  private rhythmFocus = 50
+  private rhythmFocus = 50 // Used in UI controls
   
   // Track mode properties
   private trackStartTime = 0
@@ -58,6 +304,10 @@ class MeJApp {
   private evolutionTimer: number | null = null
   private mediaRecorder: MediaRecorder | null = null
   private recordedChunks: Blob[] = []
+  
+  // Musical structure managers
+  private songStructure: SongStructureManager | null = null
+  private continuousEvolution: ContinuousEvolutionManager | null = null
 
   constructor() {
     this.initializeUI()
@@ -307,6 +557,18 @@ class MeJApp {
 
   private setMode(mode: 'continuous' | 'track') {
     this.mode = mode
+    
+    // Clear existing managers
+    this.songStructure = null
+    this.continuousEvolution = null
+    
+    // Initialize new managers
+    if (mode === 'track') {
+      this.songStructure = new SongStructureManager(this.currentPreset)
+    } else {
+      this.continuousEvolution = new ContinuousEvolutionManager(this.currentPreset)
+    }
+    
     document.querySelectorAll('.mode-btn').forEach(btn => {
       btn.classList.remove('active')
     })
@@ -326,6 +588,14 @@ class MeJApp {
 
   private setPreset(preset: string) {
     this.currentPreset = preset
+    
+    // Reinitialize managers with new preset
+    if (this.mode === 'track') {
+      this.songStructure = new SongStructureManager(preset)
+    } else {
+      this.continuousEvolution = new ContinuousEvolutionManager(preset)
+    }
+    
     document.querySelectorAll('.preset-btn').forEach(btn => {
       btn.classList.remove('active')
     })
@@ -358,6 +628,11 @@ class MeJApp {
         this.setParameter('rhythmFocus', 80)
         break
     }
+    
+    // Update pattern immediately if playing
+    if (this.isPlaying) {
+      this.updatePattern()
+    }
   }
 
   private generateNewTrack() {
@@ -366,18 +641,7 @@ class MeJApp {
     }
   }
 
-  private safePatternGeneration(patternName: string, generator: () => any): any {
-    try {
-      console.log(`Generating ${patternName} pattern...`)
-      const pattern = generator()
-      console.log(`Successfully generated ${patternName} pattern`)
-      return pattern
-    } catch (error) {
-      console.error(`Failed to generate ${patternName} pattern:`, error)
-    // Fallback to a simple safe pattern using basic oscillator
-    return s("sine").note("c3").gain(0.3).orbit(1)
-    }
-  }
+
 
   private startPattern() {
     if (!this.audioContext) return
@@ -413,313 +677,104 @@ class MeJApp {
     }
   }
 
-  // Parameter mapping utilities
-  private getEnergyPattern(energy: number): EnergyMap {
-    return {
-      density: Math.floor(energy / 20) + 1, // 1-6 events per cycle
-      speed: energy > 70 ? 1.5 : energy > 40 ? 1 : 0.5,
-      gain: 0.3 + (energy / 100) * 0.7,
-      degrade: energy < 30 ? 0.5 : energy < 60 ? 0.2 : 0
-    }
-  }
 
-  private getComplexityPattern(complexity: number): ComplexityMap {
-    return {
-      layers: complexity > 70 ? 3 : complexity > 40 ? 2 : 1,
-      polyrhythm: complexity > 60,
-      effects: complexity > 50,
-      variation: complexity / 100,
-      randomness: complexity > 60 ? 'wchoose' : 'choose'
-    }
-  }
-
-  private getAtmospherePattern(atmosphere: number): AtmosphereMap {
-    return {
-      reverb: atmosphere / 100,
-      release: 0.1 + (atmosphere / 100) * 2,
-      filter: atmosphere > 60 ? { lpf: 800, lpq: 5 } : {},
-      decay: atmosphere > 70 ? 0.5 : atmosphere > 40 ? 0.2 : 0.1,
-      pad: atmosphere > 80
-    }
-  }
-
-  private getRhythmPattern(rhythmFocus: number): RhythmMap {
-    return {
-      euclidean: rhythmFocus > 50,
-      pulse: rhythmFocus > 70 ? 16 : rhythmFocus > 40 ? 8 : 4,
-      swing: rhythmFocus > 60,
-      subdivision: Math.floor(rhythmFocus / 20) + 2
-    }
-  }
 
   private generatePattern() {
-    const energyMap = this.getEnergyPattern(this.energy)
-    const complexityMap = this.getComplexityPattern(this.complexity)
-    const atmosphereMap = this.getAtmospherePattern(this.atmosphere)
-    const rhythmMap = this.getRhythmPattern(this.rhythmFocus)
-    
-    // Use preset-specific generators with error handling
-    switch (this.currentPreset) {
-      case 'starry': 
-        return this.safePatternGeneration('starry', () => 
-          this.generateStarryPattern(energyMap, complexityMap, atmosphereMap, rhythmMap))
-      case 'flow': 
-        return this.safePatternGeneration('flow', () => 
-          this.generateFlowPattern(energyMap, complexityMap, atmosphereMap, rhythmMap))
-      case 'glitch': 
-        return this.safePatternGeneration('glitch', () => 
-          this.generateGlitchPattern(energyMap, complexityMap, atmosphereMap, rhythmMap))
-      case 'demon': 
-        return this.safePatternGeneration('demon', () => 
-          this.generateDemonPattern(energyMap, complexityMap, atmosphereMap, rhythmMap))
-      default: 
-        return this.safePatternGeneration('default', () => 
-          this.generateDefaultPattern(energyMap, complexityMap, atmosphereMap, rhythmMap))
+    try {
+      // Get musical configuration for current preset
+      const config = PRESET_MUSICAL_CONFIG[this.currentPreset]
+      if (!config) {
+        return this.generateSafeFallbackPattern()
+      }
+
+      if (this.mode === 'track' && this.songStructure) {
+        // Track mode: Use song structure
+        return this.applyAudioMixing(this.songStructure.getCurrentPattern())
+      } else if (this.mode === 'continuous' && this.continuousEvolution) {
+        // Continuous mode: Use evolution system
+        return this.applyAudioMixing(this.continuousEvolution.getEvolvingPattern())
+      } else {
+        // Fallback: generate basic pattern
+        return this.applyAudioMixing(this.generateBasicPattern(config))
+      }
+    } catch (error) {
+      console.error('Failed to generate pattern:', error)
+      return this.generateSafeFallbackPattern()
     }
   }
 
-  private generateStarryPattern(energyMap: EnergyMap, _complexityMap: ComplexityMap, atmosphereMap: AtmosphereMap, _rhythmMap: RhythmMap) {
-    // Ethereal pad
-    const pads = s("sine")
-      .freq("261.63")
-      .attack(2)
-      .decay(0.5)
-      .sustain(0.8)
-      .release(3)
-      .room(atmosphereMap.reverb)
-      .roomsize(8)
-      .lpf(1200)
-      .lpq(3)
-      .gain(0.3)
-      .sometimesBy(0.1, (x: any) => x.phaser(4))
-      .orbit(1)
+  private generateBasicPattern(config: PresetMusicalConfig): any {
+    const drumPattern = MusicalPatternLibrary.getDrumPattern(this.currentPreset, this.energy)
     
-    // Twinkling accents - use crackle noise
-    const accents = s("crackle")
-      .density(0.05)
-      .gain(0.1)
-      .pan(sine.slow(4).range(0.2, 0.8))
-      .room(atmosphereMap.reverb * 0.3)
-      .orbit(2)
-    
-    // Sparse rhythm - use synthesized kick
-    const rhythm = s("sine")
-      .freq(60)
-      .gain(energyMap.gain * 0.6)
-      .lpf(60)
-      .orbit(3)
+    return stack(
+      s(drumPattern.kick).gain(0.6).orbit(1),
+      s(drumPattern.snare).gain(0.5).orbit(2),
+      s(drumPattern.hihat).gain(0.3).orbit(3),
+      MusicalPatternLibrary.getBassPattern(this.currentPreset, config.key, this.energy).orbit(4),
+      MusicalPatternLibrary.getChordPattern(this.currentPreset, config.key, this.atmosphere).orbit(5),
+      MusicalPatternLibrary.getMelodyPattern(this.currentPreset, config.key, this.complexity).orbit(6)
+    )
+  }
 
+  private applyAudioMixing(pattern: any): any {
     const speedMultiplier = this.currentSpeed === 'slow' ? 0.5 : 
                           this.currentSpeed === 'fast' ? 1.5 : 1
 
-    // Apply overall gain control to prevent clipping
-    const masterGain = 0.8
-    return stack(pads, accents, rhythm).fast(speedMultiplier).gain(masterGain)
+    return pattern
+      .fast(speedMultiplier)
+      .compressor("-20:4:10:0.001:0.1")  // Prevent clipping
+      .postgain(0.8)                        // Master volume
+      .sometimesBy(0.1, (x: any) => x.chorus(0.3)) // Stereo width
   }
 
-  private generateFlowPattern(_energyMap: EnergyMap, _complexityMap: ComplexityMap, atmosphereMap: AtmosphereMap, _rhythmMap: RhythmMap) {
-    // Flowing bass - use simpler freq values
-    const bass = s("sawtooth")
-      .freq("130.81")
-      .attack(0.1)
-      .decay(0.3)
-      .sustain(0.4)
-      .lpf(800)
-      .lpenv(2)
-      .lpattack(0.2)
-      .lpdecay(0.1)
-      .lpq(3)
-      .gain(0.4)
-      .orbit(1)
-    
-    // Liquid hi-hats - use pink noise instead of hh sample
-    const hihats = s("pink")
-      .speed(16)
-      .degradeBy(0.1)
-      .gain(0.2)
-      .hpf(2000)
-      .hpq(5)
-      .lpf(8000)
-      .lpq(2)
-      .orbit(2)
-    
-    // Melodic flow
-    const melody = s("triangle")
-      .freq("261.63")
-      .fast(2)
-      .attack(0.05)
-      .sustain(0.3)
-      .pan(sine.slow(2))
-      .release(atmosphereMap.release)
-      .sometimesBy(0.2, (x: any) => x.penv(12).pattack(0.1))
-      .sometimesBy(0.1, (x: any) => x.phaser(2).delay(0.25))
-      .orbit(3)
-
-    const speedMultiplier = this.currentSpeed === 'slow' ? 0.5 : 
-                          this.currentSpeed === 'fast' ? 1.5 : 1
-
-    // Apply overall gain control to prevent clipping
-    const masterGain = 0.75
-    return stack(bass, hihats, melody).fast(speedMultiplier).gain(masterGain)
+  private generateSafeFallbackPattern(): any {
+    // Safe fallback that always works
+    return stack(
+      s("bd ~ ~ ~").gain(0.5).orbit(1),
+      s("hh*8").gain(0.2).orbit(2),
+      note("c3").s("sine").gain(0.3).orbit(3)
+    ).compressor("-20:4:10:0.001:0.1").postgain(0.6)
   }
 
-  private generateGlitchPattern(energyMap: EnergyMap, _complexityMap: ComplexityMap, _atmosphereMap: AtmosphereMap, _rhythmMap: RhythmMap) {
-    // Glitchy drums - use synthesized kick and snare
-    const kick = s("sine")
-      .freq(80)
-      .gain(energyMap.gain * 0.5)
-      .orbit(1)
-    
-    const snare = s("triangle")
-      .freq(200)
-      .gain(energyMap.gain * 0.3)
-      .orbit(2)
-    
-    // Digital noise
-    const noise = s("white")
-      .coarse(8)
-      .lpf(4000)
-      .gain(0.1)
-      .pan(choose(0, 0.5, 1))
-      .orbit(2)
-    
-    // FM melodic glitches
-    const melody = s("sawtooth")
-      .freq("523.25")
-      .fm(10)
-      .fmh(2)
-      .fmattack(0.01)
-      .fmdecay(0.1)
-      .attack(0.001)
-      .release(0.05)
-      .gain(0.3)
-      .sometimesBy(0.5, (x: any) => x.crush(4))
-      .orbit(3)
 
-    const speedMultiplier = this.currentSpeed === 'slow' ? 0.5 : 
-                          this.currentSpeed === 'fast' ? 1.5 : 1
-
-    // Apply overall gain control to prevent clipping
-    const masterGain = 0.6
-    return stack(kick, snare, noise, melody).fast(speedMultiplier).gain(masterGain)
-  }
-
-  private generateDemonPattern(energyMap: EnergyMap, _complexityMap: ComplexityMap, _atmosphereMap: AtmosphereMap, _rhythmMap: RhythmMap) {
-    // Heavy distorted kick
-    const kick = s("sine")
-      .freq(50)
-      .distort(10)
-      .lpf(80)
-      .lpq(20)
-      .gain(energyMap.gain * 1.2)
-      .sometimesBy(0.5, (x: any) => x.fast(2))
-      .orbit(1)
-    
-    // Aggressive snare
-    const snare = s("square")
-      .freq("196.00")
-      .mask("sd*2")
-      .distort(5)
-      .hpf(1000)
-      .hpq(3)
-      .attack(0.001)
-      .release(0.05)
-      .gain(0.7)
-      .orbit(2)
-    
-    // Menacing bass
-    const bass = s("sawtooth")
-      .freq("65.41")
-      .fm(8)
-      .fmh(1.5)
-      .lpf(400)
-      .lpq(15)
-      .distort(3)
-      .attack(0.05)
-      .gain(0.8)
-      .orbit(3)
-    
-    // Harsh noise textures
-    const noise = s("pink")
-      .distort(8)
-      .crush(2)
-      .lpf(2000)
-      .gain(0.15)
-      .hpf(500)
-      .sometimesBy(0.3, (x: any) => x.speed("<1 2 4>"))
-      .sometimesBy(0.2, (x: any) => x.coarse(4))
-      .orbit(4)
-
-    const speedMultiplier = this.currentSpeed === 'slow' ? 0.5 : 
-                          this.currentSpeed === 'fast' ? 1.5 : 1
-
-    // Apply overall gain control to prevent clipping
-    const masterGain = 0.5
-    return stack(kick, snare, bass, noise).fast(speedMultiplier).gain(masterGain)
-  }
-
-  private generateDefaultPattern(energyMap: EnergyMap, _complexityMap: ComplexityMap, atmosphereMap: AtmosphereMap, rhythmMap: RhythmMap) {
-    // Basic pattern using parameter maps
-    const baseRhythm = rhythmMap.euclidean 
-      ? `bd(${energyMap.density},${rhythmMap.pulse})`
-      : `bd*${energyMap.density}`
-
-    const drums = s(baseRhythm)
-      .gain(energyMap.gain)
-      .degradeBy(energyMap.degrade)
-      .orbit(1)
-
-    const bass = s("sawtooth")
-      .freq("130.81")
-      .lpf(atmosphereMap.filter.lpf || 400)
-      .gain(0.4)
-      .orbit(2)
-
-    const melody = s("triangle")
-      .freq("261.63")
-      .release(atmosphereMap.release)
-      .orbit(3)
-
-    const speedMultiplier = this.currentSpeed === 'slow' ? 0.5 : 
-                          this.currentSpeed === 'fast' ? 1.5 : 1
-
-    // Apply overall gain control to prevent clipping
-    const masterGain = 0.7
-    return stack(drums, bass, melody).fast(speedMultiplier).gain(masterGain)
-  }
 
   private setupContinuousMode() {
+    // Initialize continuous evolution manager
+    this.continuousEvolution = new ContinuousEvolutionManager(this.currentPreset)
+    
     // Clear any existing evolution timer
     if (this.evolutionTimer) {
       clearInterval(this.evolutionTimer)
     }
 
-    // Evolve parameters gradually over time for continuous flow
+    // Evolve the musical structure gradually
     this.evolutionTimer = window.setInterval(() => {
-      if (!this.isPlaying) return
+      if (!this.isPlaying || !this.continuousEvolution) return
 
-      // Randomly adjust one parameter slightly for organic evolution
-      const params = ['energy', 'complexity', 'atmosphere', 'rhythmFocus'] as const
-      const randomParam = params[Math.floor(Math.random() * params.length)]
-      const currentValue = this[randomParam]
+      // Evolve the pattern
+      this.continuousEvolution.evolve()
       
-      // Small adjustment (±5)
-      let newValue = currentValue + (Math.random() < 0.5 ? -5 : 5)
-      newValue = Math.max(0, Math.min(100, newValue))
-      
-      this.setParameter(randomParam, newValue)
+      // Update pattern with evolved structure
+      const pat = this.continuousEvolution.getEvolvingPattern()
+      if (this.scheduler) {
+        this.scheduler.setPattern(pat)
+      }
       
       // Occasionally switch presets for more variety
-      if (Math.random() < 0.02) { // 2% chance every interval
+      if (Math.random() < 0.01) { // 1% chance every interval - less frequent
         const presets = ['starry', 'flow', 'glitch', 'demon']
         const currentPresetIndex = presets.indexOf(this.currentPreset)
         const newPresetIndex = (currentPresetIndex + Math.floor(Math.random() * 3) + 1) % 4
         this.setPreset(presets[newPresetIndex])
+        this.continuousEvolution = new ContinuousEvolutionManager(this.currentPreset)
       }
-    }, 8000) // Evolve every 8 seconds
+    }, 4000) // Update every 4 seconds for smoother evolution
   }
 
   private setupTrackMode() {
+    // Initialize song structure manager
+    this.songStructure = new SongStructureManager(this.currentPreset)
+    
     // Generate track duration (3-4 minutes most common, occasional 7 minutes)
     const isLongTrack = Math.random() < 0.1 // 10% chance for 7-minute track
     const durationMinutes = isLongTrack ? 7 : (3 + Math.random() * 2) // 3-5 minutes typically
@@ -736,12 +791,24 @@ class MeJApp {
       }
     }, this.currentTrackDuration)
 
-    // Update timer every second
+    // Update timer and song structure every second
     const timerInterval = setInterval(() => {
       if (!this.isPlaying || this.mode !== 'track') {
         clearInterval(timerInterval)
         return
       }
+      
+      // Advance song structure every 8 seconds (approximately 1 bar)
+      if (Date.now() - this.trackStartTime > 0 && (Date.now() - this.trackStartTime) % 8000 < 1000) {
+        if (this.songStructure) {
+          this.songStructure.advanceSection()
+          const pat = this.songStructure.getCurrentPattern()
+          if (this.scheduler) {
+            this.scheduler.setPattern(pat)
+          }
+        }
+      }
+      
       this.updateTrackTimer()
     }, 1000)
   }
