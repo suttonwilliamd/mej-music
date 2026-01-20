@@ -1,335 +1,327 @@
-// @ts-ignore - Strudel types are not available
-import { initAudioOnFirstClick, getAudioContext, webaudioOutput } from '@strudel/webaudio'
-// @ts-ignore - Import superdough for registerSynthSounds
-import { registerSynthSounds } from 'superdough'
-// @ts-ignore - Import tonal for note parsing
-import '@strudel/tonal'
-// @ts-ignore - Strudel types are not available
-import { s, stack, repl, note, choose, rand, sine, registerSound } from '@strudel/core'
+// MeJ Music Generator - Pure Web Audio API Implementation
 
-// Musical Foundation System
-interface PresetMusicalConfig {
-  key: string
-  scale: string
-  chordProgression: string[]
-  bpmRange: [number, number]
-  genre: string
+// Musical Configuration per Preset
+const PRESET_CONFIG: Record<string, { key: string, scale: string, chords: string[], bpm: number }> = {
+  starry: { key: 'A', scale: 'minor pentatonic', chords: ['Am', 'F', 'C', 'G'], bpm: 80 },
+  flow: { key: 'C', scale: 'major pentatonic', chords: ['C', 'G', 'Am', 'F'], bpm: 90 },
+  glitch: { key: 'D', scale: 'blues', chords: ['Dm', 'G', 'Am', 'E'], bpm: 130 },
+  demon: { key: 'E', scale: 'phrygian', chords: ['Em', 'C', 'G', 'D'], bpm: 140 }
 }
 
-const PRESET_MUSICAL_CONFIG: Record<string, PresetMusicalConfig> = {
-  starry: {
-    key: "A:minor",
-    scale: "A:pentatonic",
-    chordProgression: ["Am", "F", "C", "G"],
-    bpmRange: [70, 90],
-    genre: "ambient"
-  },
-  flow: {
-    key: "C:major",
-    scale: "C:pentatonic", 
-    chordProgression: ["C", "G", "Am", "F"],
-    bpmRange: [80, 100],
-    genre: "lofi"
-  },
-  glitch: {
-    key: "D:minor",
-    scale: "D:blues",
-    chordProgression: ["Dm", "G", "Am", "E"],
-    bpmRange: [120, 140],
-    genre: "idm"
-  },
-  demon: {
-    key: "E:minor",
-    scale: "E:phrygian",
-    chordProgression: ["Em", "C", "G", "D"],
-    bpmRange: [130, 150],
-    genre: "industrial"
+// Synthesized Drum Generator
+class DrumSynth {
+  private audioContext: AudioContext | null = null
+  
+  init() {
+    if (!this.audioContext) {
+      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+    }
+    return this.audioContext
+  }
+  
+  playKick(gain: number = 0.8) {
+    if (!this.audioContext) return
+    
+    const osc = this.audioContext.createOscillator()
+    const gainNode = this.audioContext.createGain()
+    
+    osc.frequency.setValueAtTime(150, this.audioContext.currentTime)
+    osc.frequency.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.5)
+    
+    gainNode.gain.setValueAtTime(gain, this.audioContext.currentTime)
+    gainNode.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + 0.5)
+    
+    osc.connect(gainNode)
+    gainNode.connect(this.audioContext.destination)
+    
+    osc.start()
+    osc.stop(this.audioContext.currentTime + 0.5)
+  }
+  
+  playSnare(gain: number = 0.6) {
+    if (!this.audioContext) return
+    
+    // Noise burst
+    const bufferSize = this.audioContext.sampleRate * 0.2
+    const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1
+    }
+    
+    const noise = this.audioContext.createBufferSource()
+    noise.buffer = buffer
+    
+    const noiseGain = this.audioContext.createGain()
+    noiseGain.gain.setValueAtTime(gain * 0.5, this.audioContext.currentTime)
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + 0.2)
+    
+    const noiseFilter = this.audioContext.createBiquadFilter()
+    noiseFilter.type = 'highpass'
+    noiseFilter.frequency.value = 1000
+    
+    noise.connect(noiseFilter)
+    noiseFilter.connect(noiseGain)
+    noiseGain.connect(this.audioContext.destination)
+    
+    // Tone
+    const osc = this.audioContext.createOscillator()
+    osc.type = 'triangle'
+    osc.frequency.setValueAtTime(180, this.audioContext.currentTime)
+    
+    const oscGain = this.audioContext.createGain()
+    oscGain.gain.setValueAtTime(gain * 0.3, this.audioContext.currentTime)
+    oscGain.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + 0.1)
+    
+    osc.connect(oscGain)
+    oscGain.connect(this.audioContext.destination)
+    
+    noise.start()
+    osc.start()
+    osc.stop(this.audioContext.currentTime + 0.2)
+  }
+  
+  playHiHat(gain: number = 0.3) {
+    if (!this.audioContext) return
+    
+    const bufferSize = this.audioContext.sampleRate * 0.05
+    const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = Math.random() * 2 - 1
+    }
+    
+    const source = this.audioContext.createBufferSource()
+    source.buffer = buffer
+    
+    const filter = this.audioContext.createBiquadFilter()
+    filter.type = 'highpass'
+    filter.frequency.value = 7000
+    
+    const gainNode = this.audioContext.createGain()
+    gainNode.gain.setValueAtTime(gain, this.audioContext.currentTime)
+    gainNode.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + 0.05)
+    
+    source.connect(filter)
+    filter.connect(gainNode)
+    gainNode.connect(this.audioContext.destination)
+    
+    source.start()
+  }
+  
+  playClap(gain: number = 0.4) {
+    if (!this.audioContext) return
+    
+    // Multiple noise bursts for clap effect
+    for (let i = 0; i < 3; i++) {
+      const delay = i * 0.01
+      const bufferSize = this.audioContext.sampleRate * 0.02
+      const buffer = this.audioContext.createBuffer(1, bufferSize, this.audioContext.sampleRate)
+      const data = buffer.getChannelData(0)
+      for (let j = 0; j < bufferSize; j++) {
+        data[j] = Math.random() * 2 - 1
+      }
+      
+      const source = this.audioContext.createBufferSource()
+      source.buffer = buffer
+      source.start(this.audioContext.currentTime + delay)
+      
+      const filter = this.audioContext.createBiquadFilter()
+      filter.type = 'bandpass'
+      filter.frequency.value = 1500
+      
+      const gainNode = this.audioContext.createGain()
+      gainNode.gain.setValueAtTime(gain * (0.3 - i * 0.08), this.audioContext.currentTime + delay)
+      gainNode.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + delay + 0.1)
+      
+      source.connect(filter)
+      filter.connect(gainNode)
+      gainNode.connect(this.audioContext.destination)
+    }
   }
 }
 
-interface DrumPattern {
-  kick: string
-  snare: string
-  hihat: string
-  percussion?: string
+// Note to frequency conversion
+function noteToFreq(note: string): number {
+  const notes: Record<string, number> = {
+    'c': 261.63, 'c#': 277.18, 'd': 293.66, 'd#': 311.13, 'e': 329.63,
+    'f': 349.23, 'f#': 369.99, 'g': 392.00, 'g#': 415.30, 'a': 440.00,
+    'a#': 466.16, 'b': 493.88
+  }
+  
+  const match = note.match(/^([a-g]#?)(-?\d)$/)
+  if (!match) return 440
+  
+  const noteName = match[1].toLowerCase()
+  const octave = parseInt(match[2])
+  
+  const baseFreq = notes[noteName] || 440
+  return baseFreq * Math.pow(2, octave - 4)
 }
 
-class MusicalPatternLibrary {
-  static getDrumPattern(preset: string, _energy: number): DrumPattern {
-    const basePatterns: Record<string, DrumPattern> = {
-      starry: {
-        kick: "bd ~ ~ ~",
-        snare: "~ ~ sd ~", 
-        hihat: "hh*8",
-        percussion: "~ ~ ~ cp"
-      },
-      flow: {
-        kick: "bd sd ~ sd",
-        snare: "~ sd ~ ~",
-        hihat: "hh*16",
-        percussion: "cp*4 ~ ~ ~"
-      },
-      glitch: {
-        kick: "bd*2 ~ bd sd",
-        snare: "sd*4 ~ ~ ~",
-        hihat: "hh*32",
-        percussion: "cp*8 sd*4 ~ ~"
-      },
-      demon: {
-        kick: "bd bd bd bd",
-        snare: "sd ~ sd ~",
-        hihat: "hh*16",
-        percussion: "cp*4 bd*4 ~ ~"
+// Oscillator-based synth for notes
+class SynthManager {
+  private audioContext: AudioContext | null = null
+  
+  init() {
+    if (!this.audioContext) {
+      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+    }
+  }
+  
+  playNote(note: string, duration: number, gain: number = 0.3, type: OscillatorType = 'sawtooth') {
+    if (!this.audioContext) return
+    
+    const freq = noteToFreq(note)
+    const osc = this.audioContext.createOscillator()
+    const gainNode = this.audioContext.createGain()
+    
+    osc.type = type
+    osc.frequency.value = freq
+    
+    gainNode.gain.value = gain
+    gainNode.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + duration)
+    
+    osc.connect(gainNode)
+    gainNode.connect(this.audioContext.destination)
+    
+    osc.start()
+    osc.stop(this.audioContext.currentTime + duration)
+  }
+  
+  playChord(chord: string[], duration: number, gain: number = 0.2) {
+    chord.forEach(note => {
+      this.playNote(note, duration, gain)
+    })
+  }
+}
+
+// Simple Pattern Scheduler
+class PatternScheduler {
+  private drumSynth: DrumSynth
+  private synthManager: SynthManager
+  private currentTime = 0
+  private isPlaying = false
+  private intervalId: number | null = null
+  
+  constructor() {
+    this.drumSynth = new DrumSynth()
+    this.synthManager = new SynthManager()
+  }
+  
+  init() {
+    this.drumSynth.init()
+    this.synthManager.init()
+  }
+  
+  start(bpm: number, pattern: string[], onStep?: (step: number) => void) {
+    this.initAudio()
+    this.isPlaying = true
+    this.currentTime = 0
+    
+    const stepTime = 60 / bpm / 4 // 16th notes
+    
+    this.intervalId = window.setInterval(() => {
+      if (!this.isPlaying) return
+      
+      const stepIndex = Math.floor(this.currentTime) % pattern.length
+      const patternStr = pattern[stepIndex]
+      
+      if (onStep) {
+        onStep(stepIndex)
+      }
+      
+      this.playPatternStep(patternStr)
+      this.currentTime += 0.25 // Advance 1/16th note
+    }, stepTime * 1000)
+  }
+  
+  private initAudio() {
+    this.drumSynth.init()
+    this.synthManager.init()
+  }
+  
+  private playPatternStep(patternStr: string) {
+    const sounds = patternStr.split(' ').filter(s => s.trim())
+    
+    sounds.forEach(sound => {
+      if (sound === '~') return // Rest
+      
+      // Handle repetition like "bd*4" means play bd 4 times
+      const match = sound.match(/^([a-z]+)(\*(\d+))?$/)
+      if (match) {
+        const name = match[1]
+        const count = match[3] ? parseInt(match[3]) : 1
+        for (let i = 0; i < count; i++) {
+          this.playSound(name, i * 0.08)
+        }
+      }
+    })
+  }
+  
+  private playSound(name: string, delay: number) {
+    const playFn = () => {
+      switch (name) {
+        case 'bd':
+          this.drumSynth.playKick(0.8)
+          break
+        case 'sn':
+          this.drumSynth.playSnare(0.6)
+          break
+        case 'hh':
+          this.drumSynth.playHiHat(0.25)
+          break
+        case 'cp':
+          this.drumSynth.playClap(0.4)
+          break
       }
     }
     
-    return basePatterns[preset] || basePatterns.flow
-  }
-
-  static getBassPattern(preset: string, key: string, _energy: number): any {
-    // Use key parameter to avoid TypeScript warning
-    console.log(`Bass pattern using key: ${key}`)
-    
-    const bassPatterns: Record<string, any> = {
-      starry: note("a1 ~ ~ ~").scale(key).s("sawtooth").attack(2).sustain(4).lpf(100).gain(0.2),
-      flow: note("c1 ~ g1 ~").scale(key).s("sawtooth").attack(0.1).sustain(0.4).lpf(600).gain(0.4),
-      glitch: note("d1 ~ a1 ~").scale(key).s("sawtooth").fm(4).fmh(2).lpf(800).lpq(10).attack(0.01).gain(0.5),
-      demon: note("e1 ~ e1 ~").scale(key).s("sawtooth").fm(8).fmh(1.5).lpf(400).lpq(15).distort(3).attack(0.01).gain(0.8)
+    if (delay > 0) {
+      setTimeout(playFn, delay * 1000)
+    } else {
+      playFn()
     }
-    
-    return bassPatterns[preset] || bassPatterns.flow
   }
-
-  static getChordPattern(preset: string, key: string, _atmosphere: number): any {
-    const progression = PRESET_MUSICAL_CONFIG[preset]?.chordProgression || ["C", "G", "Am", "F"]
-    const chordPattern = note(`<${progression.join(' ')}>`).scale(key)
-    
-    const chordStyles: Record<string, any> = {
-      starry: chordPattern.s("sine").voicing().attack(3).sustain(8).release(4).room(0.8).size(0.9).dry(0.2).lpf(800).lpq(3).gain(0.3),
-      flow: chordPattern.s("sawtooth").voicing().attack(0.1).sustain(2).release(0.5).room(0.4).sometimesBy(0.2, (x: any) => x.crush(12)).gain(0.4),
-      glitch: chordPattern.s("square").voicing().fast(2).attack(0.01).release(0.1).lpf(2000).lpq(5).sometimesBy(0.3, (x: any) => x.crush(8)).gain(0.3),
-      demon: chordPattern.s("sawtooth").voicing().attack(0.01).sustain(0.5).distort(2).lpf(500).lpq(8).gain(0.5)
-    }
-    
-    return chordStyles[preset] || chordStyles.flow
+  
+  playBass(note: string) {
+    this.synthManager.playNote(note, 0.5, 0.4, 'sawtooth')
   }
-
-  static getMelodyPattern(preset: string, key: string, _complexity: number): any {
-    const scale = PRESET_MUSICAL_CONFIG[preset]?.scale || "C:pentatonic"
-    
-    const melodyPatterns: Record<string, any> = {
-      starry: note("0 [4 7] [12 7] 4").scale(scale).s("triangle").attack(0.5).release(2).gain(0.2).sometimesBy(0.3, (x: any) => x.delay(0.5)).pan(sine.slow(8)),
-      flow: note("0 4 7 ~").scale(scale).s("triangle").fast(2).attack(0.05).release(0.3).gain(0.3).pan(sine.slow(4)),
-      glitch: note("[0 2 4 7] [7 4 2 0]").scale(scale).s("square").fast(4).sometimesBy(0.3, (x: any) => x.fast(8)).sometimesBy(0.2, (x: any) => x.reverse()).gain(0.3),
-      demon: note("0 3 6 ~").scale(scale).s("square").distort(3).attack(0.001).release(0.05).gain(0.4)
+  
+  playChord(chord: string[]) {
+    this.synthManager.playChord(chord, 1.0, 0.15)
+  }
+  
+  playMelody(note: string) {
+    this.synthManager.playNote(note, 0.3, 0.15, 'triangle')
+  }
+  
+  stop() {
+    this.isPlaying = false
+    if (this.intervalId) {
+      clearInterval(this.intervalId)
+      this.intervalId = null
     }
-    
-    return melodyPatterns[preset] || melodyPatterns.flow
   }
 }
 
-// Song Structure System for Track Mode
-class SongStructureManager {
-  private sections = ['intro', 'verse', 'chorus', 'verse', 'chorus', 'outro']
-  private currentSectionIndex = 0
-  private sectionCounter = 0
-  private sectionLength = 8 // cycles per section
-  private preset: string
-
-  constructor(preset: string) {
-    this.preset = preset
-  }
-
-  getCurrentPattern(): any {
-    const currentSection = this.sections[this.currentSectionIndex]
-    
-    switch(currentSection) {
-      case 'intro':
-        return this.generateIntro()
-      case 'verse': 
-        return this.generateVerse()
-      case 'chorus':
-        return this.generateChorus()
-      case 'outro':
-        return this.generateOutro()
-      default:
-        return this.generateVerse()
-    }
-  }
-
-  private generateIntro(): any {
-    const config = PRESET_MUSICAL_CONFIG[this.preset]
-    // Sparse version of main groove
-    return stack(
-      s("bd ~ ~ ~").gain(0.4).room(0.3).orbit(1),
-      MusicalPatternLibrary.getBassPattern(this.preset, config.key, 30).gain(0.3).orbit(2),
-      MusicalPatternLibrary.getChordPattern(this.preset, config.key, 50).gain(0.2).orbit(3)
-    )
-  }
-
-  private generateVerse(): any {
-    const config = PRESET_MUSICAL_CONFIG[this.preset]
-    const drumPattern = MusicalPatternLibrary.getDrumPattern(this.preset, 50)
-    
-    // Main groove with elements
-    return stack(
-      s(drumPattern.kick).gain(0.6).orbit(1),
-      s(drumPattern.snare).gain(0.5).orbit(2),
-      s(drumPattern.hihat).gain(0.3).orbit(3),
-      MusicalPatternLibrary.getBassPattern(this.preset, config.key, 50).orbit(4),
-      MusicalPatternLibrary.getChordPattern(this.preset, config.key, 50).gain(0.4).orbit(5),
-      MusicalPatternLibrary.getMelodyPattern(this.preset, config.key, 50).gain(0.3).orbit(6)
-    )
-  }
-
-  private generateChorus(): any {
-    const config = PRESET_MUSICAL_CONFIG[this.preset]
-    const drumPattern = MusicalPatternLibrary.getDrumPattern(this.preset, 80)
-    
-    // Full arrangement - higher energy
-    return stack(
-      s(drumPattern.kick).gain(1.2).orbit(1),
-      s(drumPattern.snare).gain(1.1).orbit(2),
-      s(drumPattern.hihat).gain(1.3).orbit(3),
-      MusicalPatternLibrary.getBassPattern(this.preset, config.key, 80).lpf(600).gain(1.3).orbit(4),
-      MusicalPatternLibrary.getChordPattern(this.preset, config.key, 80).attack(0.1).gain(1.4).orbit(5),
-      MusicalPatternLibrary.getMelodyPattern(this.preset, config.key, 80).fast(1.2).gain(1.5).orbit(6),
-      // Extra pad layer in chorus
-      note("a2").s("sine").attack(2).sustain(4).room(0.6).gain(0.2).orbit(7)
-    )
-  }
-
-  private generateOutro(): any {
-    const config = PRESET_MUSICAL_CONFIG[this.preset]
-    // Fade out
-    return stack(
-      s("bd ~ ~ ~").gain(0.2).degradeBy(0.5).orbit(1),
-      MusicalPatternLibrary.getChordPattern(this.preset, config.key, 30).attack(4).gain(0.2).orbit(2)
-    )
-  }
-
-  advanceSection(): void {
-    this.sectionCounter++
-    if (this.sectionCounter >= this.sectionLength) {
-      this.currentSectionIndex = (this.currentSectionIndex + 1) % this.sections.length
-      this.sectionCounter = 0
-    }
-  }
-
-  getCurrentSectionName(): string {
-    return this.sections[this.currentSectionIndex]
-  }
-}
-
-// Continuous Evolution System
-class ContinuousEvolutionManager {
-  private evolutionStage = 0
-  private currentChordIndex = 0
-  private preset: string
-
-  constructor(preset: string) {
-    this.preset = preset
-  }
-
-  getEvolvingPattern(): any {
-    const config = PRESET_MUSICAL_CONFIG[this.preset]
-    
-    // Slowly evolve parameters
-    const energyModulation = 0.5 + (Math.sin(this.evolutionStage) * 0.3)
-    const complexityModulation = 0.5 + (Math.cos(this.evolutionStage * 0.7) * 0.3)
-    
-    // Change chords slowly
-    if (Math.floor(this.evolutionStage) % 32 === 0) {
-      this.currentChordIndex = (this.currentChordIndex + 1) % config.chordProgression.length
-    }
-    
-    return this.generateEvolvingPattern(config, energyModulation, complexityModulation)
-  }
-
-  private generateEvolvingPattern(config: PresetMusicalConfig, energyMod: number, complexityMod: number): any {
-    const drumPattern = MusicalPatternLibrary.getDrumPattern(this.preset, energyMod * 100)
-    
-    return stack(
-      s(drumPattern.kick).gain(0.5 + energyMod * 0.5).orbit(1),
-      s(drumPattern.snare).gain(0.4 + energyMod * 0.4).orbit(2),
-      s(drumPattern.hihat).gain(0.3 + complexityMod * 0.3).orbit(3),
-      MusicalPatternLibrary.getBassPattern(this.preset, config.key, energyMod * 100).orbit(4),
-      this.getEvolvingChords(config).orbit(5),
-      this.getEvolvingMelody(config, complexityMod).orbit(6)
-    )
-  }
-
-  private getEvolvingChords(config: PresetMusicalConfig): any {
-    const currentChord = config.chordProgression[this.currentChordIndex]
-    // Use config.key in scale
-    return note(currentChord).scale(config.key).s("sine").voicing()
-      .attack(2).sustain(6).release(3)
-      .room(0.6).gain(0.3)
-  }
-
-  private getEvolvingMelody(config: PresetMusicalConfig, complexity: number): any {
-    const melodicDensity = complexity > 0.7 ? 2 : 1
-    // Use config.key and config.scale
-    return note("0 [4 7] ~").scale(config.scale).s("triangle")
-      .fast(melodicDensity)
-      .attack(0.1).release(0.5)
-      .gain(0.2 + complexity * 0.2)
-      .pan(sine.slow(8))
-  }
-
-  evolve(): void {
-    this.evolutionStage += 0.01
-  }
-}
-
-
-
+// Main App Class
 class MeJApp {
-  private audioContext: AudioContext | null = null
-  private scheduler: any = null
+  private scheduler: PatternScheduler | null = null
   private isPlaying = false
-  private currentSpeed = 'mid'
   private currentPreset = 'flow'
-  private mode: 'continuous' | 'track' = 'continuous'
+  private currentMode: 'continuous' | 'track' = 'continuous'
   
-  // Parameters
-  private energy = 50
-  private complexity = 50
-  private atmosphere = 50
-  private rhythmFocus = 50 // Used in UI controls
+  // UI Elements
+  private playBtn: HTMLElement | null = null
+  private pauseBtn: HTMLElement | null = null
   
-  // Track mode properties
-  private trackStartTime = 0
-  private currentTrackDuration = 0
-  private evolutionTimer: number | null = null
-  private mediaRecorder: MediaRecorder | null = null
-  private recordedChunks: Blob[] = []
-  
-  // Musical structure managers
-  private songStructure: SongStructureManager | null = null
-  private continuousEvolution: ContinuousEvolutionManager | null = null
-
   constructor() {
-    this.initializeUI()
-    this.initializeAudio()
+    this.createUI()
+    this.attachEvents()
   }
-
-  private initializeAudio() {
-    try {
-      initAudioOnFirstClick()
-      this.audioContext = getAudioContext()
-      // Register basic synth sounds (sine, sawtooth, triangle, square, etc.)
-      registerSynthSounds()
-      console.log('Audio initialized successfully')
-    } catch (error) {
-      console.error('Failed to initialize audio:', error)
-    }
-  }
-
-
-
-  private initializeUI() {
-    // Create main app container
+  
+  private createUI() {
     const app = document.getElementById('app')!
     app.innerHTML = `
       <div class="header">MeJ</div>
@@ -396,33 +388,31 @@ class MeJApp {
         <div class="track-status" id="track-status">Ready</div>
       </div>
     `
-
-    this.attachEventListeners()
+    
+    this.playBtn = document.getElementById('play-btn')
+    this.pauseBtn = document.getElementById('pause-btn')
   }
-
-  private attachEventListeners() {
-    // Mode controls
+  
+  private attachEvents() {
     document.querySelectorAll('.mode-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const target = e.target as HTMLElement
         this.setMode(target.dataset.mode as 'continuous' | 'track')
       })
     })
-
-    // Playback controls
-    document.getElementById('play-btn')?.addEventListener('click', () => this.play())
-    document.getElementById('pause-btn')?.addEventListener('click', () => this.pause())
+    
+    this.playBtn?.addEventListener('click', () => this.play())
+    this.pauseBtn?.addEventListener('click', () => this.pause())
     document.getElementById('prev-btn')?.addEventListener('click', () => this.previousTrack())
-
-    // Speed controls
+    
     document.querySelectorAll('.speed-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const target = e.target as HTMLElement
-        this.setSpeed(target.dataset.speed as string)
+        const speed = target.dataset.speed || 'mid'
+        this.setSpeed(speed)
       })
     })
-
-    // Parameter sliders
+    
     document.querySelectorAll('.parameter-slider').forEach(slider => {
       slider.addEventListener('click', (e) => {
         const target = e.target as HTMLElement
@@ -435,8 +425,7 @@ class MeJApp {
         }
       })
     })
-
-    // Preset buttons
+    
     document.querySelectorAll('.preset-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         const target = e.target as HTMLElement
@@ -446,102 +435,59 @@ class MeJApp {
         }
       })
     })
-
-    // New track button
+    
     document.querySelector('.new-track-btn')?.addEventListener('click', () => {
       this.generateNewTrack()
     })
   }
-
-  private async play() {
-    // Initialize audio context on first interaction
-    if (!this.audioContext) {
-      this.audioContext = getAudioContext()
-    }
+  
+  private play() {
+    this.scheduler = new PatternScheduler()
     
-    if (this.audioContext && this.audioContext.state === 'suspended') {
-      await this.audioContext.resume()
-    }
-
-    // Initialize audio output
-    try {
-      console.log('Audio output initialized')
-    } catch (error) {
-      console.error('Failed to initialize audio output:', error)
-    }
-
     this.isPlaying = true
-    const playBtn = document.getElementById('play-btn')
-    const pauseBtn = document.getElementById('pause-btn')
-    if (playBtn) playBtn.style.display = 'none'
-    if (pauseBtn) pauseBtn.style.display = 'block'
-
-    // Start recording if in track mode
-    if (this.mode === 'track') {
-      this.startRecording()
-    }
-
-    // Start pattern generation
-    this.startPattern()
+    if (this.playBtn) this.playBtn.style.display = 'none'
+    if (this.pauseBtn) this.pauseBtn.style.display = 'block'
+    
+    const config = PRESET_CONFIG[this.currentPreset]
+    
+    this.scheduler.start(config.bpm, this.getDrumPattern(), (step) => {
+      this.onBeat(step)
+    })
+    
+    console.log(`Playing ${this.currentPreset} at ${config.bpm} BPM`)
   }
-
+  
   private pause() {
     this.isPlaying = false
-    const playBtn = document.getElementById('play-btn')
-    const pauseBtn = document.getElementById('pause-btn')
-    if (playBtn) playBtn.style.display = 'block'
-    if (pauseBtn) pauseBtn.style.display = 'none'
+    if (this.playBtn) this.playBtn.style.display = 'block'
+    if (this.pauseBtn) this.pauseBtn.style.display = 'none'
     
-    // Stop the current pattern
     if (this.scheduler) {
       this.scheduler.stop()
+      this.scheduler = null
     }
-
-    // Stop recording and save if in track mode
-    if (this.mode === 'track' && this.mediaRecorder) {
-      this.stopRecording()
-    }
-
-    // Clear evolution timer
-    if (this.evolutionTimer) {
-      clearInterval(this.evolutionTimer)
-      this.evolutionTimer = null
-    }
+    
+    console.log('Paused')
   }
-
+  
   private previousTrack() {
-    this.generateNewTrack()
+    this.pause()
+    this.play()
   }
-
+  
   private setSpeed(speed: string) {
-    this.currentSpeed = speed
     document.querySelectorAll('.speed-btn').forEach(btn => {
       btn.classList.remove('active')
     })
     document.querySelector(`[data-speed="${speed}"]`)?.classList.add('active')
     
     if (this.isPlaying) {
-      this.updatePattern()
+      this.pause()
+      this.play()
     }
   }
-
+  
   private setParameter(param: string, value: number) {
-    switch (param) {
-      case 'energy':
-        this.energy = value
-        break
-      case 'complexity':
-        this.complexity = value
-        break
-      case 'atmosphere':
-        this.atmosphere = value
-        break
-      case 'rhythmFocus':
-        this.rhythmFocus = value
-        break
-    }
-
-    // Update UI
     const slider = document.querySelector(`[data-param="${param}"]`)
     if (slider) {
       const valueElement = slider.querySelector('.parameter-value') as HTMLElement
@@ -549,377 +495,161 @@ class MeJApp {
         valueElement.style.left = `${value}%`
       }
     }
-
-    if (this.isPlaying) {
-      this.updatePattern()
-    }
+    
+    console.log(`Parameter ${param}: ${value}`)
   }
-
+  
   private setMode(mode: 'continuous' | 'track') {
-    this.mode = mode
-    
-    // Clear existing managers
-    this.songStructure = null
-    this.continuousEvolution = null
-    
-    // Initialize new managers
-    if (mode === 'track') {
-      this.songStructure = new SongStructureManager(this.currentPreset)
-    } else {
-      this.continuousEvolution = new ContinuousEvolutionManager(this.currentPreset)
-    }
+    this.currentMode = mode
     
     document.querySelectorAll('.mode-btn').forEach(btn => {
       btn.classList.remove('active')
     })
     document.querySelector(`[data-mode="${mode}"]`)?.classList.add('active')
-
-    // Show/hide track info
+    
     const trackInfo = document.getElementById('track-info')
     if (trackInfo) {
       trackInfo.style.display = mode === 'track' ? 'block' : 'none'
     }
-
-    // Restart if playing to apply new mode
-    if (this.isPlaying) {
-      this.startPattern()
-    }
   }
-
+  
   private setPreset(preset: string) {
     this.currentPreset = preset
-    
-    // Reinitialize managers with new preset
-    if (this.mode === 'track') {
-      this.songStructure = new SongStructureManager(preset)
-    } else {
-      this.continuousEvolution = new ContinuousEvolutionManager(preset)
-    }
     
     document.querySelectorAll('.preset-btn').forEach(btn => {
       btn.classList.remove('active')
     })
     document.querySelector(`[data-preset="${preset}"]`)?.classList.add('active')
-
-    // Apply preset values
-    switch (preset) {
-      case 'starry':
-        this.setParameter('energy', 60)
-        this.setParameter('complexity', 50)
-        this.setParameter('atmosphere', 80)
-        this.setParameter('rhythmFocus', 30)
-        break
-      case 'flow':
-        this.setParameter('energy', 50)
-        this.setParameter('complexity', 30)
-        this.setParameter('atmosphere', 50)
-        this.setParameter('rhythmFocus', 25)
-        break
-      case 'glitch':
-        this.setParameter('energy', 70)
-        this.setParameter('complexity', 80)
-        this.setParameter('atmosphere', 40)
-        this.setParameter('rhythmFocus', 75)
-        break
-      case 'demon':
-        this.setParameter('energy', 85)
-        this.setParameter('complexity', 75)
-        this.setParameter('atmosphere', 20)
-        this.setParameter('rhythmFocus', 80)
-        break
+    
+    const presets: Record<string, { energy: number, complexity: number, atmosphere: number, rhythm: number }> = {
+      starry: { energy: 60, complexity: 50, atmosphere: 80, rhythm: 30 },
+      flow: { energy: 50, complexity: 30, atmosphere: 50, rhythm: 25 },
+      glitch: { energy: 70, complexity: 80, atmosphere: 40, rhythm: 75 },
+      demon: { energy: 85, complexity: 75, atmosphere: 20, rhythm: 80 }
     }
     
-    // Update pattern immediately if playing
+    const values = presets[preset]
+    if (values) {
+      this.setParameter('energy', values.energy)
+      this.setParameter('complexity', values.complexity)
+      this.setParameter('atmosphere', values.atmosphere)
+      this.setParameter('rhythmFocus', values.rhythm)
+    }
+    
     if (this.isPlaying) {
-      this.updatePattern()
+      this.pause()
+      this.play()
     }
   }
-
+  
   private generateNewTrack() {
     if (this.isPlaying) {
-      this.startPattern()
+      this.pause()
+      this.play()
     }
   }
-
-
-
-  private startPattern() {
-    if (!this.audioContext) return
-
-    try {
-      // Initialize scheduler if not exists
-      if (!this.scheduler) {
-        this.scheduler = repl({
-          defaultOutput: webaudioOutput,
-          getTime: () => this.audioContext!.currentTime
-        })
-      }
-
-      // Setup mode-specific behavior
-      if (this.mode === 'track') {
-        this.setupTrackMode()
-      } else {
-        this.setupContinuousMode()
-      }
-
-      const pat = this.generatePattern()
-      this.scheduler.setPattern(pat)
-      this.scheduler.start()
-      console.log(`Pattern started in ${this.mode} mode`)
-    } catch (error) {
-      console.error('Failed to start pattern:', error)
+  
+  private getDrumPattern(): string[] {
+    const patterns: Record<string, string[]> = {
+      starry: [
+        "bd ~ ~ ~", "~ ~ sn ~", "hh ~ hh ~", "~ ~ ~ cp",
+        "bd ~ ~ ~", "~ sn ~ ~", "hh ~ hh ~", "~ ~ ~ ~",
+        "bd ~ ~ ~", "~ ~ sn ~", "hh ~ hh ~", "~ ~ ~ cp",
+        "bd ~ ~ ~", "~ sn ~ ~", "hh ~ hh ~", "~ ~ ~ ~"
+      ],
+      flow: [
+        "bd ~ bd ~", "~ sn ~ ~", "hh ~ hh ~", "~ ~ ~ cp",
+        "bd ~ ~ ~", "~ ~ sn ~", "hh ~ hh ~", "~ ~ ~ ~",
+        "bd ~ bd ~", "~ sn ~ ~", "hh ~ hh ~", "~ ~ ~ cp",
+        "bd ~ ~ ~", "~ ~ sn ~", "hh ~ hh ~", "~ ~ ~ ~"
+      ],
+      glitch: [
+        "bd*2 ~ bd sn", "sn*4 ~ ~ ~", "hh*8 ~ ~ ~", "cp*4 ~ ~ ~",
+        "bd ~ ~ ~", "sn ~ sn ~", "hh*4 ~ ~ ~", "~ ~ ~ cp",
+        "bd*2 ~ bd sn", "sn*4 ~ ~ ~", "hh*8 ~ ~ ~", "cp*4 ~ ~ ~",
+        "bd ~ ~ sn", "sn ~ ~ ~", "hh*4 ~ ~ ~", "~ ~ ~ ~"
+      ],
+      demon: [
+        "bd bd bd bd", "sn ~ sn ~", "hh*8 ~ ~ ~", "cp*4 bd*4",
+        "bd ~ ~ ~", "sn ~ sn ~", "hh*4 ~ ~ ~", "~ ~ ~ cp",
+        "bd bd bd bd", "sn ~ sn ~", "hh*8 ~ ~ ~", "cp*4 bd*4",
+        "bd ~ ~ ~", "sn ~ sn ~", "hh*4 ~ ~ ~", "~ ~ ~ ~"
+      ]
     }
-  }
-
-  private updatePattern() {
-    if (this.isPlaying) {
-      this.startPattern()
-    }
-  }
-
-
-
-  private generatePattern() {
-    try {
-      // Get musical configuration for current preset
-      const config = PRESET_MUSICAL_CONFIG[this.currentPreset]
-      if (!config) {
-        return this.generateSafeFallbackPattern()
-      }
-
-      if (this.mode === 'track' && this.songStructure) {
-        // Track mode: Use song structure
-        return this.applyAudioMixing(this.songStructure.getCurrentPattern())
-      } else if (this.mode === 'continuous' && this.continuousEvolution) {
-        // Continuous mode: Use evolution system
-        return this.applyAudioMixing(this.continuousEvolution.getEvolvingPattern())
-      } else {
-        // Fallback: generate basic pattern
-        return this.applyAudioMixing(this.generateBasicPattern(config))
-      }
-    } catch (error) {
-      console.error('Failed to generate pattern:', error)
-      return this.generateSafeFallbackPattern()
-    }
-  }
-
-  private generateBasicPattern(config: PresetMusicalConfig): any {
-    const drumPattern = MusicalPatternLibrary.getDrumPattern(this.currentPreset, this.energy)
     
-    return stack(
-      s(drumPattern.kick).gain(0.6).orbit(1),
-      s(drumPattern.snare).gain(0.5).orbit(2),
-      s(drumPattern.hihat).gain(0.3).orbit(3),
-      MusicalPatternLibrary.getBassPattern(this.currentPreset, config.key, this.energy).orbit(4),
-      MusicalPatternLibrary.getChordPattern(this.currentPreset, config.key, this.atmosphere).orbit(5),
-      MusicalPatternLibrary.getMelodyPattern(this.currentPreset, config.key, this.complexity).orbit(6)
-    )
+    return patterns[this.currentPreset] || patterns.flow
   }
-
-  private applyAudioMixing(pattern: any): any {
-    const speedMultiplier = this.currentSpeed === 'slow' ? 0.5 : 
-                          this.currentSpeed === 'fast' ? 1.5 : 1
-
-    return pattern
-      .fast(speedMultiplier)
-      .compressor("-20:4:10:0.001:0.1")  // Prevent clipping
-      .postgain(0.8)                        // Master volume
-      .sometimesBy(0.1, (x: any) => x.chorus(0.3)) // Stereo width
-  }
-
-  private generateSafeFallbackPattern(): any {
-    // Safe fallback that always works
-    return stack(
-      s("bd ~ ~ ~").gain(0.5).orbit(1),
-      s("hh*8").gain(0.2).orbit(2),
-      note("c3").s("sine").gain(0.3).orbit(3)
-    ).compressor("-20:4:10:0.001:0.1").postgain(0.6)
-  }
-
-
-
-  private setupContinuousMode() {
-    // Initialize continuous evolution manager
-    this.continuousEvolution = new ContinuousEvolutionManager(this.currentPreset)
+  
+  private getChordForStep(step: number): string[] {
+    const config = PRESET_CONFIG[this.currentPreset]
+    const chordIndex = Math.floor(step / 4) % config.chords.length
+    const chordName = config.chords[chordIndex]
     
-    // Clear any existing evolution timer
-    if (this.evolutionTimer) {
-      clearInterval(this.evolutionTimer)
+    const chordMap: Record<string, string[]> = {
+      'C': ['c4', 'e4', 'g4'],
+      'G': ['g3', 'b3', 'd4'],
+      'Am': ['a3', 'c4', 'e4'],
+      'F': ['f3', 'a3', 'c4'],
+      'Dm': ['d3', 'f3', 'a3'],
+      'Em': ['e3', 'g3', 'b3'],
+      'E': ['e3', 'g#3', 'b3']
     }
-
-    // Evolve the musical structure gradually
-    this.evolutionTimer = window.setInterval(() => {
-      if (!this.isPlaying || !this.continuousEvolution) return
-
-      // Evolve the pattern
-      this.continuousEvolution.evolve()
-      
-      // Update pattern with evolved structure
-      const pat = this.continuousEvolution.getEvolvingPattern()
-      if (this.scheduler) {
-        this.scheduler.setPattern(pat)
+    
+    return chordMap[chordName] || ['c4', 'e4', 'g4']
+  }
+  
+  private getBassNote(step: number): string {
+    const bassMap: Record<string, string[]> = {
+      'starry': ['a1', 'f1', 'c2', 'g1'],
+      'flow': ['c2', 'g1', 'a1', 'f1'],
+      'glitch': ['d2', 'g1', 'a1', 'e2'],
+      'demon': ['e1', 'c2', 'g1', 'd2']
+    }
+    
+    const bassPattern = bassMap[this.currentPreset] || bassMap.flow
+    const noteIndex = Math.floor(step / 4) % bassPattern.length
+    return bassPattern[noteIndex]
+  }
+  
+  private onBeat(step: number) {
+    if (!this.scheduler) return
+    
+    // Play bass on beat 1 and 3
+    if (step % 4 === 0 || step % 4 === 8) {
+      const bassNote = this.getBassNote(step)
+      this.scheduler.playBass(bassNote)
+    }
+    
+    // Play chords on certain steps
+    if (step % 8 === 4) {
+      const chord = this.getChordForStep(step)
+      this.scheduler.playChord(chord)
+    }
+    
+    // Play melody occasionally based on preset
+    const melodyChance: Record<string, number> = {
+      'starry': 0.1,
+      'flow': 0.05,
+      'glitch': 0.2,
+      'demon': 0.15
+    }
+    
+    if (Math.random() < (melodyChance[this.currentPreset] || 0.1)) {
+      const melodyNotes: Record<string, string[]> = {
+        'starry': ['a4', 'c5', 'b4', 'c5'],
+        'flow': ['c5', 'e4', 'g4', 'c4'],
+        'glitch': ['g4', 'b4', 'd5', 'b4'],
+        'demon': ['e3', 'g3', 'b3', 'e4']
       }
       
-      // Occasionally switch presets for more variety
-      if (Math.random() < 0.01) { // 1% chance every interval - less frequent
-        const presets = ['starry', 'flow', 'glitch', 'demon']
-        const currentPresetIndex = presets.indexOf(this.currentPreset)
-        const newPresetIndex = (currentPresetIndex + Math.floor(Math.random() * 3) + 1) % 4
-        this.setPreset(presets[newPresetIndex])
-        this.continuousEvolution = new ContinuousEvolutionManager(this.currentPreset)
-      }
-    }, 4000) // Update every 4 seconds for smoother evolution
-  }
-
-  private setupTrackMode() {
-    // Initialize song structure manager
-    this.songStructure = new SongStructureManager(this.currentPreset)
-    
-    // Generate track duration (3-4 minutes most common, occasional 7 minutes)
-    const isLongTrack = Math.random() < 0.1 // 10% chance for 7-minute track
-    const durationMinutes = isLongTrack ? 7 : (3 + Math.random() * 2) // 3-5 minutes typically
-    this.currentTrackDuration = durationMinutes * 60 * 1000 // Convert to milliseconds
-    this.trackStartTime = Date.now()
-
-    // Update track timer display
-    this.updateTrackTimer()
-
-    // Set timer for track completion
-    setTimeout(() => {
-      if (this.isPlaying && this.mode === 'track') {
-        this.completeTrack()
-      }
-    }, this.currentTrackDuration)
-
-    // Update timer and song structure every second
-    const timerInterval = setInterval(() => {
-      if (!this.isPlaying || this.mode !== 'track') {
-        clearInterval(timerInterval)
-        return
-      }
-      
-      // Advance song structure every 8 seconds (approximately 1 bar)
-      if (Date.now() - this.trackStartTime > 0 && (Date.now() - this.trackStartTime) % 8000 < 1000) {
-        if (this.songStructure) {
-          this.songStructure.advanceSection()
-          const pat = this.songStructure.getCurrentPattern()
-          if (this.scheduler) {
-            this.scheduler.setPattern(pat)
-          }
-        }
-      }
-      
-      this.updateTrackTimer()
-    }, 1000)
-  }
-
-  private updateTrackTimer() {
-    const elapsed = Date.now() - this.trackStartTime
-    const remaining = Math.max(0, this.currentTrackDuration - elapsed)
-    
-    const minutes = Math.floor(remaining / 60000)
-    const seconds = Math.floor((remaining % 60000) / 1000)
-    
-    const timerElement = document.getElementById('track-timer')
-    const statusElement = document.getElementById('track-status')
-    
-    if (timerElement) {
-      timerElement.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+      const notes = melodyNotes[this.currentPreset] || melodyNotes.flow
+      const note = notes[Math.floor(Math.random() * notes.length)]
+      this.scheduler.playMelody(note)
     }
-    
-    if (statusElement) {
-      const elapsedMinutes = Math.floor(elapsed / 60000)
-      const elapsedSeconds = Math.floor((elapsed % 60000) / 1000)
-      statusElement.textContent = `Playing - ${elapsedMinutes}:${elapsedSeconds.toString().padStart(2, '0')} elapsed`
-    }
-  }
-
-  private completeTrack() {
-    // Stop recording and save
-    if (this.mediaRecorder) {
-      this.stopRecording()
-    }
-
-    // Update status
-    const statusElement = document.getElementById('track-status')
-    if (statusElement) {
-      statusElement.textContent = 'Complete!'
-    }
-
-    // Auto-start a new track after a brief pause
-    setTimeout(() => {
-      if (this.mode === 'track') {
-        this.generateNewTrack()
-      }
-    }, 2000)
-  }
-
-  private startRecording() {
-    if (!this.audioContext) return
-
-    try {
-      const destination = this.audioContext.createMediaStreamDestination()
-      
-      // Connect existing audio context to recording destination
-      // Note: This is a simplified approach. In a production app, you'd need
-      // to properly route all audio sources through this destination
-      
-      this.mediaRecorder = new MediaRecorder(destination.stream)
-      this.recordedChunks = []
-
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          this.recordedChunks.push(event.data)
-        }
-      }
-
-      this.mediaRecorder.onstop = () => {
-        this.saveRecording()
-      }
-
-      this.mediaRecorder.start()
-      console.log('Recording started')
-    } catch (error) {
-      console.error('Failed to start recording:', error)
-    }
-  }
-
-  private stopRecording() {
-    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-      this.mediaRecorder.stop()
-      console.log('Recording stopped')
-    }
-  }
-
-  private saveRecording() {
-    if (this.recordedChunks.length === 0) return
-
-    const blob = new Blob(this.recordedChunks, { type: 'audio/webm' })
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-    const preset = this.currentPreset
-    const duration = Math.floor(this.currentTrackDuration / 1000)
-    
-    const filename = `mej-track-${preset}-${duration}s-${timestamp}.webm`
-    
-    // Create download link
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-
-    console.log(`Track saved as ${filename}`)
-    
-    // Clear recording
-    this.recordedChunks = []
-    this.mediaRecorder = null
   }
 }
 
-// Initialize the app when DOM is loaded
+// Initialize app when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
   new MeJApp()
 })
