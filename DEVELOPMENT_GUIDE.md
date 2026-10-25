@@ -1,214 +1,31 @@
-# MeJ Music Generator - Development Guide
+# MeJ development and acceptance
 
-## Overview
+See README for the actual native Web Audio architecture and supported features. The prior Strudel/Tauri development assumptions do not apply.
 
-MeJ is a browser-based music generator that creates real-time electronic music using the Web Audio API. It features 4 genre presets, pattern-based drum sequencing, and synthesized bass/chord/melody generation.
+## Checks
 
-## Architecture
+Use Node 22. Run `npm ci`, `npm test`, and `npm run build`. GitHub Actions repeats test/build on Ubuntu and Windows after an authorized push. Do not treat Linux results as Windows evidence.
 
-### Core Components
+The transport accepts an injected Clock and hit callback; tests assert concrete expected millisecond durations, not a copy of the implementation formula. A generation token guards stale callbacks even if clock cancellation races. The UI accepts an injected Instrument so state and asynchronous resume failure/cancellation can be tested without real audio hardware.
 
-```
-src/
-├── main.ts      # Complete application (14KB)
-├── style.css    # UI styling
-└── index.html   # Entry point
-```
+## Visual direction
 
-### Audio System (Pure Web Audio API)
+A compact field instrument: charcoal/forest surfaces (`#141b1b`, `#202c27`), warm off-white type (`#f4f1e9`), readable sage secondary text (`#b7c3bd`), and acid-lime active states (`#d6f28b`). Serif emphasis contrasts with system UI typography; no external font requests. Amber focus rings (`#ffcb83`) are distinct from selected outlines. Primary controls are at least 48px high. Two-column desktop hierarchy collapses at 760px; preset cards retain a two-by-two grid. The step strip is decorative and hidden from assistive technology, not an announced stream of beats.
 
-**DrumSynth Class**
-- `playKick(gain)` - Oscillator with pitch envelope (150Hz → 0.01Hz)
-- `playSnare(gain)` - Noise burst + triangle tone blend
-- `playHiHat(gain)` - High-pass filtered noise (7000Hz+)
-- `playClap(gain)` - Triple noise burst with bandpass filtering
+## Required rendered acceptance before release
 
-**SynthManager Class**
-- `playNote(note, duration, gain, type)` - Single oscillator notes
-- `playChord(chord[], duration, gain)` - Chord synthesis
-- Supports sawtooth, triangle, square, sine waves
+This service worker has no configured browser/screenshot tool. Baseline: `eb5ea18` (use a separate checkout; do not reset the delivery branch). The baseline entry point imported `main.ts` without importing its stylesheet, so do not assume the old CSS represented its rendered appearance.
 
-**PatternScheduler Class**
-- 16-step sequencer based on BPM
-- Handles pattern strings like "bd*2 ~ bd sn"
-- Calls back on each step for harmony generation
+CEO-assisted screenshot handoff:
 
-### Musical System
+1. Capture baseline at `eb5ea18` and the delivered branch at 1280×900 and 375×812; also inspect 320px width and 200% zoom for horizontal overflow.
+2. Capture final paused Flow/Mid and playing Glitch/Fast states. Confirm 90 BPM and 163 BPM respectively (rounding 162.5 up).
+3. Tab through transport and radio groups. Capture an amber keyboard-focus ring. Verify Space toggles playback, arrow keys change native radio selection, the focus stays on the Play/Pause button, and selected cards have a border plus text distinction.
+4. Check reduced-motion preference: no animated transitions; no glow on the moving current-step marker. Verify status is announced politely but steps are not announced.
+5. Return the actual images for BobRoss review, or explicitly record CEO visual acceptance. Do not release based on source inspection or jsdom alone.
 
-**Preset Configuration**
-```typescript
-const PRESET_CONFIG: Record<string, { key, scale, chords, bpm }> = {
-  starry: { key: 'A', scale: 'minor pentatonic', chords: ['Am', 'F', 'C', 'G'], bpm: 80 },
-  flow:   { key: 'C', scale: 'major pentatonic', chords: ['C', 'G', 'Am', 'F'], bpm: 90 },
-  glitch: { key: 'D', scale: 'blues', chords: ['Dm', 'G', 'Am', 'E'], bpm: 130 },
-  demon:  { key: 'E', scale: 'phrygian', chords: ['Em', 'C', 'G', 'D'], bpm: 140 }
-}
-```
+## Browser audio / Windows acceptance
 
-**Pattern Format**
-- 16-step sequences using Tidal-style notation
-- `bd` = kick, `sn` = snare, `hh` = hi-hat, `cp` = clap
-- `~` = rest
-- `*n` = repeat n times (e.g., `bd*4` plays kick 4 times)
+At low device volume, exercise each preset and each speed. Verify perceived tempo changes, only one loop plays after repeated clicks, pause silences tails and delayed drum bursts, restart returns to step zero, and switching presets cancels old bursts. Check start-pause during audio permission/startup and unsupported-audio failure messaging. Recheck after tab background/foreground (timer drift is a known limitation). Confirm no console exceptions. Repeat browser behavior on native Windows once the authorized runner is available; no Windows testing is claimed here.
 
-### UI System
-
-**MeJApp Class**
-- Creates and manages all UI elements
-- Handles event listeners for controls
-- Coordinates between UI and audio systems
-- Maintains playback state
-
-## Development Commands
-
-```bash
-npm run dev      # Start development server
-npm run build    # Build for production
-npm run preview  # Preview production build
-```
-
-## Audio Setup
-
-The audio context initializes on first user interaction (browser requirement):
-
-```typescript
-private play() {
-  this.scheduler = new PatternScheduler()
-  this.scheduler.init() // Creates AudioContext
-  this.scheduler.start(bpm, pattern, onStep)
-}
-```
-
-## Adding New Presets
-
-1. Add to `PRESET_CONFIG`:
-```typescript
-newpreset: { 
-  key: 'F#', 
-  scale: 'dorian', 
-  chords: ['F#m', 'E', 'B', 'C#m'], 
-  bpm: 125 
-}
-```
-
-2. Add drum pattern in `getDrumPattern()`:
-```typescript
-newpreset: [
-  "bd ~ bd ~", "sn ~ sn ~", "hh*8 ~", "~ ~ cp ~",
-  // ... 16 steps total
-]
-```
-
-3. Add bass pattern in `getBassNote()`:
-```typescript
-const bassMap: Record<string, string[]> = {
-  newpreset: ['f#2', 'e2', 'b2', 'c#2'],
-  // ...
-}
-```
-
-4. Add melody notes in `onBeat()`:
-```typescript
-const melodyNotes: Record<string, string[]> = {
-  newpreset: ['f#4', 'a4', 'b4', 'c#5'],
-  // ...
-}
-```
-
-## Audio Synthesis Details
-
-### Kick Drum
-```typescript
-osc.frequency.setValueAtTime(150, time)
-osc.frequency.exponentialRampToValueAtTime(0.01, time + 0.5)
-```
-
-### Snare (Noise + Tone)
-```typescript
-// Noise component
-const buffer = createBuffer(noiseData)
-const noiseFilter = createBiquadFilter('highpass', 1000)
-
-// Tone component  
-osc.type = 'triangle'
-osc.frequency.value = 180
-```
-
-### Hi-Hat
-```typescript
-const filter = createBiquadFilter('highpass', 7000)
-// White noise through high-pass filter
-```
-
-### Chord Synthesis
-```typescript
-playChord(chord: string[], duration: number, gain: number) {
-  chord.forEach(note => playNote(note, duration, gain))
-}
-```
-
-## Pattern Notation Reference
-
-| Symbol | Meaning | Example |
-|--------|---------|---------|
-| `bd` | Kick drum | `"bd ~ ~ ~"` |
-| `sn` | Snare | `"~ sn ~ ~"` |
-| `hh` | Hi-hat | `"hh*8"` |
-| `cp` | Clap | `"~ ~ ~ cp"` |
-| `~` | Rest (silence) | `"bd ~ sn ~"` |
-| `*n` | Repeat n times | `"bd*4"` |
-| `|` | Bar separator (visual only) | Not used in code |
-
-## Performance Considerations
-
-- AudioContext created once on first play
-- Oscillators created/destroyed per note (no pooling)
-- Pattern scheduler uses setInterval (not requestAnimationFrame)
-- No external dependencies or network requests
-
-## Browser Compatibility
-
-Requires modern browser with:
-- Web Audio API
-- AudioContext
-- ES6+ JavaScript
-
-Tested on Chrome, Firefox, Edge, Safari.
-
-## Troubleshooting
-
-**No audio?**
-- User must interact with page first (browser policy)
-- Check browser console for errors
-
-**Distorted audio?**
-- Reduce gain values in playNote/playKick calls
-- Check AudioContext sample rate
-
-**Latency?**
-- Pattern scheduler uses setInterval (may drift slightly)
-- Acceptable for musical timing (<10ms variance)
-
-## File Structure
-
-```
-mej-music/
-├── src/
-│   ├── main.ts      # All application code
-│   ├── style.css    # UI styles
-│   └── index.html   # Entry point
-├── dist/            # Production build
-├── package.json     # Dependencies
-├── tsconfig.json    # TypeScript config
-└── README.md        # This guide
-```
-
-## Dependencies
-
-- **Vite** - Build tool
-- **TypeScript** - Type safety
-- **No audio libraries** - Pure Web Audio API
-
-## License
-
-MIT License
+Source tracking intentionally stops active Web Audio nodes on pause instead of suspending a context full of future notes. No desktop app, recording, timer or mood feature should be claimed without a separately tested implementation.
