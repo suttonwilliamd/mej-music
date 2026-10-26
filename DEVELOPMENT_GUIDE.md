@@ -6,6 +6,24 @@ See README for the actual native Web Audio architecture and supported features. 
 
 Use Node 22. Run `npm ci`, `npm test`, and `npm run build`. GitHub Actions repeats test/build on Ubuntu and Windows after an authorized push. Do not treat Linux results as Windows evidence.
 
+### Retained development-tool advisories
+
+Vitest is pinned to 4.1.12 (including `@vitest/mocker` 4.1.12) to address
+GHSA-82fw-gwwq-j7x9 and GHSA-qxg6-89mg-rqv8 without jumping to Vitest 5.
+This version no longer needs tinypool, removing the retained prototype-pollution
+gadgets rather than overriding its dependency range. Compatible lockfile refreshes
+update PostCSS, Rollup, nanoid and source-map-js; Vite remains 6.4.5 and Playwright
+remains 1.64.1. No test, application, browser harness or workflow change is needed.
+
+The October 26, 2026 local full audit moved from seven affected **development**
+entries (one moderate, four high, two critical) to zero; production audit remained
+zero. Audit entries include dependency propagation and are not seven demonstrated
+production exploits. Registry audit results are time-specific, not a guarantee
+against unknown vulnerabilities. Never expose development/test servers to untrusted
+networks or use untrusted inputs on the assumption that production audit covers them.
+Recheck with `npm audit --json` and `npm audit --omit=dev --json` after fresh
+`npm ci`; all 18 existing tests and the build must still pass.
+
 ### Real built-dist browser smoke
 
 After `npm ci && npm test && npm run build`, run `npx playwright install chromium`
