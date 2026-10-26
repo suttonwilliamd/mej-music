@@ -44,6 +44,38 @@ describe('sixteenth-note transport', () => {
     expect(hit.mock.calls.flat()).toEqual(['sn','bd'])
     transport.stop()
   })
+  it('reads the live gate once per step; dispatched repeats survive an edit but not stop', () => {
+    vi.useFakeTimers()
+    let enabled = true
+    const hit = vi.fn(), step = vi.fn()
+    const transport = new Transport(globalThis, hit)
+    transport.start(120, ['sn*4','bd','hh','cp'], step, () => enabled)
+    vi.advanceTimersByTime(125)
+    enabled = false // already dispatched step 1 keeps its three scheduled repeats
+    vi.advanceTimersByTime(125)
+    expect(hit.mock.calls.flat()).toEqual(['sn','sn','sn','sn'])
+    expect(step.mock.calls).toEqual([[0,true],[1,false]])
+    enabled = true
+    vi.advanceTimersByTime(125)
+    expect(hit.mock.calls.flat()).toEqual(['sn','sn','sn','sn','hh'])
+    transport.start(120, ['sn*4'], step, () => enabled)
+    vi.advanceTimersByTime(125)
+    transport.stop()
+    vi.advanceTimersByTime(500)
+    expect(hit.mock.calls.flat()).toEqual(['sn','sn','sn','sn','hh','sn'])
+  })
+  it('fences stale interval and deferred callbacks even if clock cancellation loses a race', () => {
+    const intervals: Array<() => void> = [], deferred: Array<() => void> = []
+    const clock = { setInterval: (fn: () => void) => intervals.push(fn), clearInterval: () => {}, setTimeout: (fn: () => void) => deferred.push(fn), clearTimeout: () => {} }
+    const hit = vi.fn()
+    const transport = new Transport(clock, hit)
+    transport.start(120, ['sn*2'])
+    intervals[0]()
+    transport.stop()
+    transport.start(120, ['bd'])
+    intervals[0](); deferred[0](); intervals[1]()
+    expect(hit.mock.calls.flat()).toEqual(['sn','bd'])
+  })
   it('does not emit a drum after an onStep callback stops the run', () => {
     vi.useFakeTimers()
     const hit = vi.fn()
