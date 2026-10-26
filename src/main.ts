@@ -105,22 +105,39 @@ export class MeJApp {
   private ready = false
   private request = 0
   private transport: Transport
+  // One session-wide groove mask. Preset/tempo/restart/pause do not replace edits.
+  private mask = Array<boolean>(16).fill(true)
 
   constructor(private root: HTMLElement, private audio: Instrument = new AudioEngine()) {
     this.transport = new Transport(window, sound => this.audio.drum(sound))
     root.innerHTML = `
       <header><a class="wordmark" href="./" aria-label="MeJ home">MeJ<span> / </span></a><span class="edition">A small generative instrument · 0.1</span></header>
       <main>
-        <div class="intro"><p class="eyebrow">Make room for a little noise</p><h1>Find your<br><em>own frequency.</em></h1><p>Four starting points. An endless loop.<br>Choose a character, then press play.</p></div>
+        <div class="intro"><p class="eyebrow">Make room for a little noise</p><h1>Find your<br><em>own frequency.</em></h1><p>Four starting points. An endless loop.<br>Choose a character. Shape its steps. Press play.</p></div>
         <section class="instrument" aria-label="Music controls">
           <div class="readout"><div><p class="eyebrow">Now selected</p><h2 id="preset-name">Flow</h2></div><p class="tempo"><span id="bpm">90</span><span>BPM</span></p></div>
-          <div class="step-strip" aria-hidden="true">${Array.from({length:16}, () => '<i></i>').join('')}</div>
+          <fieldset class="pattern-editor" aria-describedby="pattern-help">
+            <legend>Shape your loop <span>· 16 groove steps</span></legend>
+            <p id="pattern-help">On lets the preset play; off skips all voices at that step. Edits affect future steps, not notes or repeats already started.</p>
+            <div class="step-grid">${Array.from({length:16}, (_, index) => `<button type="button" class="step-toggle" aria-label="Step ${index + 1}" aria-pressed="true" data-step="${index}"><span>${String(index + 1).padStart(2, '0')}</span><span class="step-state">On</span></button>`).join('')}</div>
+            <div class="pattern-actions"><p id="pattern-summary">16 of 16 steps on</p><button id="reset-pattern" type="button">Restore default pattern</button></div>
+            <p class="pattern-hint">Default = all steps on. Restore keeps your character, tempo and play position.</p>
+          </fieldset>
           <div class="transport"><button id="play" class="primary" aria-label="Play music" aria-pressed="false"><span aria-hidden="true">▶</span> <span id="play-label">Play</span></button><button id="restart" aria-label="Restart loop from beginning">↺ <span>Restart</span></button><p id="status" role="status" aria-live="polite">Paused</p></div>
           <fieldset class="speed"><legend>Tempo <span>· relative to preset</span></legend>${(['slow','mid','fast'] as const).map(speed => `<label><input type="radio" name="speed" value="${speed}" ${speed === 'mid' ? 'checked' : ''}><span>${speed[0].toUpperCase() + speed.slice(1)}</span></label>`).join('')}</fieldset>
           <fieldset class="presets"><legend>Choose your character</legend>${Object.entries(PRESETS).map(([key,preset], index) => `<label><input type="radio" name="preset" value="${key}" ${key === 'flow' ? 'checked' : ''}><span class="card"><span class="card-number">0${index+1}</span><strong>${preset.name}</strong><span>${preset.description}</span></span></label>`).join('')}</fieldset>
         </section>
         <aside><strong>Just the essentials.</strong> Continuous playback with synthesized drums, bass, chords and occasional melody. Mood shaping, timed tracks, recording and “New Track” generation aren’t available in this version.</aside>
       </main><footer>Made in your browser. No samples, no account.<span>Start with your volume low.</span></footer>`
+    root.querySelectorAll<HTMLButtonElement>('.step-toggle').forEach(button => button.addEventListener('click', () => {
+      const step = Number(button.dataset.step)
+      this.mask[step] = !this.mask[step]
+      this.updatePattern()
+    }))
+    root.querySelector('#reset-pattern')!.addEventListener('click', () => {
+      this.mask.fill(true)
+      this.updatePattern()
+    })
     root.querySelector('#play')!.addEventListener('click', () => this.playing ? this.pause() : void this.play())
     root.querySelector('#restart')!.addEventListener('click', () => { if (this.playing) this.startLoop() })
     root.querySelectorAll<HTMLInputElement>('input[name="speed"]').forEach(input => input.addEventListener('change', () => {
@@ -133,7 +150,16 @@ export class MeJApp {
       this.update()
       if (this.playing) this.startLoop()
     }))
+    this.updatePattern()
     this.update()
+  }
+
+  private updatePattern() {
+    this.root.querySelectorAll<HTMLButtonElement>('.step-toggle').forEach((button, index) => {
+      button.setAttribute('aria-pressed', String(this.mask[index]))
+      button.querySelector('.step-state')!.textContent = this.mask[index] ? 'On' : 'Off'
+    })
+    this.root.querySelector('#pattern-summary')!.textContent = `${this.mask.filter(Boolean).length} of 16 steps on`
   }
 
   private update() {
@@ -146,7 +172,7 @@ export class MeJApp {
     this.root.querySelector('#status')!.textContent = this.playing ? 'Playing' : 'Paused'
     this.root.querySelector<HTMLButtonElement>('#restart')!.disabled = !this.playing
     this.root.classList.toggle('is-playing', this.playing)
-    if (!this.playing) this.root.querySelectorAll('.step-strip i').forEach(dot => dot.classList.remove('current'))
+    if (!this.playing) this.root.querySelectorAll('.step-toggle').forEach(dot => dot.classList.remove('current'))
   }
 
   private async play() {
@@ -181,12 +207,13 @@ export class MeJApp {
     if (!this.ready) return
     this.audio.stop()
     const preset = PRESETS[this.preset]
-    this.transport.start(tempo(preset.bpm, this.speed), preset.pattern, step => {
-      this.root.querySelectorAll('.step-strip i').forEach((dot, index) => dot.classList.toggle('current', step === index))
+    this.transport.start(tempo(preset.bpm, this.speed), preset.pattern, (step, enabled) => {
+      this.root.querySelectorAll('.step-toggle').forEach((dot, index) => dot.classList.toggle('current', step === index))
+      if (!enabled) return
       if (step % 4 === 0) this.audio.note(preset.bass[Math.floor(step / 4)], 0.5, 0.4)
       if (step % 8 === 4) preset.chords[Math.floor(step / 4)].forEach(note => this.audio.note(note, 1, 0.15))
       if (Math.random() < preset.chance) this.audio.note(preset.melody[Math.floor(Math.random() * preset.melody.length)], 0.3, 0.15, 'triangle')
-    })
+    }, step => this.mask[step])
   }
 }
 

@@ -10,19 +10,21 @@ The transport accepts an injected Clock and hit callback; tests assert concrete 
 
 ## Visual direction
 
-A compact field instrument: charcoal/forest surfaces (`#141b1b`, `#202c27`), warm off-white type (`#f4f1e9`), readable sage secondary text (`#b7c3bd`), and acid-lime active states (`#d6f28b`). Serif emphasis contrasts with system UI typography; no external font requests. Amber focus rings (`#ffcb83`) are distinct from selected outlines. Primary controls are at least 48px high. Two-column desktop hierarchy collapses at 760px; preset cards retain a two-by-two grid. The step strip is decorative and hidden from assistive technology, not an announced stream of beats.
+A compact field instrument: charcoal/forest surfaces (`#141b1b`, `#202c27`), warm off-white type (`#f4f1e9`), readable sage secondary text (`#b7c3bd`), and acid-lime active states (`#d6f28b`). Serif emphasis contrasts with system UI typography; no external font requests. Amber focus rings (`#ffcb83`) are distinct from selected outlines. Primary controls are at least 48px high. Two-column desktop hierarchy collapses at 760px; preset cards retain a two-by-two grid. The numbered groove pads are real buttons with stable accessible names and `aria-pressed`; On/Off labels and dashed muted borders distinguish state without color alone. Their inset amber current-step underline is visual only, not an announced stream of beats. Eight columns at widths above 1100px become four below, keeping touch targets usable at 320px. The mask gates every existing voice, rather than pretending to add unsupported instrument controls.
 
 ## Required rendered acceptance before release
 
-This service worker has no configured browser/screenshot tool. Baseline: `eb5ea18` (use a separate checkout; do not reset the delivery branch). The baseline entry point imported `main.ts` without importing its stylesheet, so do not assume the old CSS represented its rendered appearance.
+For the editable-pattern increment, the comparison baseline is public master `0feea80b06ac3bca24c2ad4e0339be506de722ee`. Actual Linux headless Chromium before/after full-page captures at 1280×900 and 320×900 were produced and inspected by BobRoss. The browser checks exercised step Space/Enter toggles, Tab order, a 3px visible keyboard focus outline, default restore, Play/live edit/Pause and native tempo arrow selection, with no page errors or horizontal overflow at either width. Additional checks covered an emulated touch tap, reduced-motion marker styling and widths 640/760/900/1100/1101px (no overflow and step targets at least 44px wide). Browser 200% zoom was not exercised; 640px reflow is not a claim of native browser zoom testing. This does not establish audible output or native Windows/browser acceptance.
 
-CEO-assisted screenshot handoff:
+Repeatable acceptance checklist:
 
-1. Capture baseline at `eb5ea18` and the delivered branch at 1280×900 and 375×812; also inspect 320px width and 200% zoom for horizontal overflow.
-2. Capture final paused Flow/Mid and playing Glitch/Fast states. Confirm 90 BPM and 163 BPM respectively (rounding 162.5 up).
-3. Tab through transport and radio groups. Capture an amber keyboard-focus ring. Verify Space toggles playback, arrow keys change native radio selection, the focus stays on the Play/Pause button, and selected cards have a border plus text distinction.
-4. Check reduced-motion preference: no animated transitions; no glow on the moving current-step marker. Verify status is announced politely but steps are not announced.
-5. Return the actual images for BobRoss review, or explicitly record CEO visual acceptance. Do not release based on source inspection or jsdom alone.
+1. Capture the baseline and candidate at desktop and 320px, including one muted pad with keyboard focus. Check intermediate widths and 200% zoom/reflow for horizontal overflow.
+2. Play each character at each tempo. Toggle steps while playing and confirm phase continues, skipped steps silence every voice, and the marker still advances. On permits existing preset content; it does not fill a rest.
+3. Confirm Restore default pattern enables all 16 steps without changing character, tempo, playback state or loop position. Confirm Pause cancels tails/repeats and Play restarts at step 1 using the edited mask.
+4. Tab through pads, restore, transport and native radio groups. Space/Enter toggle pads; arrow keys change radios. Focus must stay visible and state must be distinguishable without color.
+5. Check reduced-motion preference and polite status; moving steps must not be a live announcement. Real screen-reader behavior remains a separate manual check.
+
+Evidence from headless rendering is not a browser listening check, a physical touch-device test, or release approval.
 
 ## Browser audio / Windows acceptance
 

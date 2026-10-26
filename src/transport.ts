@@ -18,7 +18,7 @@ export class Transport {
 
   constructor(private clock: Clock, private hit: (sound: string) => void) {}
 
-  start(bpm: number, pattern: string[], onStep: (step: number) => void = () => {}) {
+  start(bpm: number, pattern: string[], onStep: (step: number, enabled: boolean) => void = () => {}, isEnabled: (step: number) => boolean = () => true) {
     this.stop()
     if (!Number.isFinite(bpm) || bpm <= 0 || !pattern.length) throw new Error('Invalid tempo or pattern')
     const generation = this.generation
@@ -27,8 +27,10 @@ export class Transport {
     this.interval = this.clock.setInterval(() => {
       if (generation !== this.generation) return
       const index = step++ % pattern.length
-      onStep(index)
-      if (generation !== this.generation) return
+      // Snapshot once per dispatch: edits cannot retract this step's scheduled hits.
+      const enabled = isEnabled(index)
+      onStep(index, enabled)
+      if (generation !== this.generation || !enabled) return
       for (const token of pattern[index].split(/\s+/)) {
         const match = token.match(/^(bd|sn|hh|cp)(?:\*(\d+))?$/)
         if (!match) continue
