@@ -8,6 +8,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -17,3 +18,15 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - name: Install pinned Chromium runtime
+        run: npx playwright install chromium
+      - name: Built-dist native browser smoke
+        run: npm run test:browser
+      - name: Retain actual browser evidence (including sanitized failures)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-smoke-${{ matrix.os }}-${{ github.sha }}
+          path: artifacts/browser-smoke/
+          if-no-files-found: warn
+          retention-days: 14
