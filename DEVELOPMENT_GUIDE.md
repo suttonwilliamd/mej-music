@@ -6,6 +6,64 @@ See README for the actual native Web Audio architecture and supported features. 
 
 Use Node 22. Run `npm ci`, `npm test`, and `npm run build`. GitHub Actions repeats test/build on Ubuntu and Windows after an authorized push. Do not treat Linux results as Windows evidence.
 
+### Retained development-tool advisories
+
+Vitest is pinned to 4.1.12 (including `@vitest/mocker` 4.1.12) to address
+GHSA-82fw-gwwq-j7x9 and GHSA-qxg6-89mg-rqv8 without jumping to Vitest 5.
+This version no longer needs tinypool, removing the retained prototype-pollution
+gadgets rather than overriding its dependency range. Compatible lockfile refreshes
+update PostCSS, Rollup, nanoid and source-map-js; Vite remains 6.4.5 and Playwright
+remains 1.64.1. No test, application, browser harness or workflow change is needed.
+
+The October 26, 2026 local full audit moved from seven affected **development**
+entries (one moderate, four high, two critical) to zero; production audit remained
+zero. Audit entries include dependency propagation and are not seven demonstrated
+production exploits. Registry audit results are time-specific, not a guarantee
+against unknown vulnerabilities. Never expose development/test servers to untrusted
+networks or use untrusted inputs on the assumption that production audit covers them.
+Recheck with `npm audit --json` and `npm audit --omit=dev --json` after fresh
+`npm ci`; all 18 existing tests and the build must still pass.
+
+### Real built-dist browser smoke
+
+After `npm ci && npm test && npm run build`, run `npx playwright install chromium`
+(user-scoped browser download, not a host package installation), then `npm run test:browser`.
+Playwright is pinned to 1.64.1 in the lockfile; its matching Chromium is the CI default.
+The existing Node 22 Ubuntu/Windows matrix retains its separate test/build steps and
+now runs this actual browser check. Workflow configuration alone is not Windows qualification:
+inspect the successful hosted Windows job and its `platform: "win32"` JSON and actual images.
+
+The harness serves only production `dist` on ephemeral IPv4 loopback, blocks other
+browser network requests and WebSockets, disables service workers, bounds operations
+and the entire run (90 seconds plus 5-second emergency cleanup), and closes its owned
+browser/server. It does not substitute audio implementations: wrappers observe native
+resume/start/stop and invoke the original methods. All-off Play advances markers with
+zero source starts; live restore resumes real native dispatch, and Pause leaves no
+new dispatch or marker. A running reused AudioContext after Pause is intentional.
+Keyboard Space/Enter/Tab, visible focus, tempo-preserving reset, page errors and
+horizontal overflow are checked at 1280 and 320 pixels. The six full-page PNGs show
+paused, keyboard-focused and playing states at each width.
+
+`artifacts/browser-smoke/results.json` is success-only qualification (`qualified: true`
+only after both viewports and cleanup), with Git head, Node/platform/browser identity,
+actual dist hashes, PNG dimensions/hashes and per-viewport outcomes. CI uploads these
+files on success or failure, under OS-and-SHA-specific artifact names. Failure messages
+are intentionally sanitized: no arbitrary browser errors, raw environment, private
+profiles or audio recordings. A new run first invalidates any old qualification; only
+files explicitly listed in that run's manifest are evidence for that attempt.
+
+Optional local-only environment controls: `MEJ_BROWSER_EXECUTABLE` selects an existing
+accessible Chromium, and `MEJ_BROWSER_OUTPUT` selects an evidence directory. Use a
+separate output directory for each attempt. `MEJ_BROWSER_FAULT=missing-dist`,
+`external-request`, or `page-error` intentionally exits nonzero with `qualified: false`
+for fail-closed regression checks (no application assertions are disabled). An invalid
+executable likewise must fail at launch. These probes do not qualify any platform.
+
+Muted headless output is not listening/device, Edge, screen-reader, sample-accuracy or
+release acceptance. Root owns review/push and actual hosted Windows verification;
+BobRoss must independently assess the actual hosted Windows images, not substitute
+these local Linux captures. No app/synthesis/preset/test semantics are changed.
+
 The transport accepts an injected Clock and hit callback; tests assert concrete expected millisecond durations, not a copy of the implementation formula. A generation token guards stale callbacks even if clock cancellation races. The UI accepts an injected Instrument so state and asynchronous resume failure/cancellation can be tested without real audio hardware.
 
 ## Visual direction
