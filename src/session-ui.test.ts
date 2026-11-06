@@ -49,7 +49,7 @@ it('rejects malformed and unsupported files without touching active playback, se
   const stops = vi.mocked(audio.stop).mock.calls.length
   for (const text of ['{', JSON.stringify({ ...defaultSession(), version: 9 }), JSON.stringify({ ...defaultSession(), steps: [true] })]) {
     await importFile(root, text)
-    expect(root.querySelector('[role="alert"]')!.textContent).toContain('Import failed')
+    expect(root.querySelector('#project-error[role="alert"]')!.textContent).toContain('Import failed')
     expect(root.querySelector('#status')!.textContent).toBe('Playing')
     expect(root.querySelector('#bpm')!.textContent).toBe('100')
     expect(mask(root)[3]).toBe(false)

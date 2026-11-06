@@ -12,6 +12,7 @@ A small browser instrument built with **native Web Audio**, TypeScript and Vite.
 - Native step buttons support Tab, Space and Enter, with truthful `aria-pressed`, visible On/Off text, dashed muted outlines and amber keyboard focus. The responsive grid uses eight columns on wide desktop and four on narrower screens.
 - Automatic browser-local session save/restore and portable JSON project download/import, sharing one validated versioned format. Loads always start paused.
 - Master volume (0–100%) and mute affect every voice and already-sounding tail without restarting the loop. Native slider arrows/Home/End and the mute button work by keyboard; the selected percentage and muted/silent state remain visible on phone.
+- Explicit local **Download WAV** renders one finite 16-step snapshot, including note tails, without recording or changing live playback.
 
 ## Run and verify
 
@@ -44,6 +45,44 @@ A live edit affects the next **not-yet-dispatched** step, without restarting the
 
 Changing settings, restoring or importing before first Play never creates or resumes audio. First Play honors the latest settings, and changes while audio startup is pending remain effective. Settings are not per-instrument mixing.
 
+## Download a WAV snapshot
+
+**Download WAV** saves `mej-<character>-<speed>.wav`: standard stereo, **44,100 Hz,
+16-bit signed little-endian PCM** in a RIFF/WAVE file. Both channels carry the
+current mono instrument mix. It uses the same preset/token planner and native
+oscillator/noise/filter/envelope synthesis as live playback, rendered locally with
+`OfflineAudioContext`; there is no codec dependency, upload, microphone/system
+recording or live-session capture.
+
+Each explicit click captures character, tempo, all 16 steps, volume and mute.
+The first step starts at **time zero**, regardless of the live play position
+(live Play retains its existing one-sixteenth startup delay). Exactly one
+16-step traversal is rendered, followed only by any still-sounding envelopes.
+Duration is the greater of the complete step span and the latest note/drum end:
+the longest voice envelope is one second. With the current presets/speeds,
+the conservative bound is **five seconds / 220,500 frames / 882,044 WAV bytes**;
+the actual snapshot is usually shorter. No extra loop or arbitrary long fade is
+added, and natural tails mean this is **not promised to be a seamless loop**.
+
+Export honors the same linear 0–100% → 0–0.6 output gain and mute; all-off,
+zero-volume and muted snapshots are valid silent WAVs, not error fallbacks.
+PCM saturates signed out-of-range samples; this is not a limiter or mastering
+service. Noise and optional melody can be freshly randomized, so a WAV need not
+match the current live realization or an earlier export. Project JSON does not
+store a random seed, and this action does not generate a new composition.
+
+Only the download button is unavailable while one render is pending; normal
+editing, Play/Pause and Restart remain available. Editing settings, restoring
+the pattern, selecting an import (even an invalid one), or resetting cancels
+that snapshot's eventual download/error. Native offline work may still finish
+internally; wait for the button to return, then explicitly download again.
+Export never starts/resumes live audio, pauses/restarts the transport, cuts
+current notes, saves settings or changes the project schema. Unsupported offline
+audio, rendering, encoding or download failures show persistent accessible
+feedback without changing the session/playback; another explicit attempt can
+recover. Keep JSON separately when you want editable settings, not just sound.
+
+
 ## Sessions, project files and privacy
 
 **Download project JSON** saves `mej-project.json`. **Import project JSON** opens a local file picker; choosing a valid file replaces your character, tempo, mask, volume and mute, cancels pending audio startup, notes and repetitions, and pauses. Press Play explicitly to start the imported loop from the beginning. Invalid, unreadable, oversized or unsupported files show an accessible error without changing your session, saved data or playback. Nothing uploads.
@@ -65,16 +104,18 @@ Preset is `starry`, `flow`, `glitch` or `demon`; speed is `slow`, `mid` or `fast
 
 Each pattern entry is one sixteenth-note step; plain space-separated tokens in an entry sound together. `sn*4` divides that step into four snare hits. A rest is `~`. The first step occurs one sixteenth after Play. Preset/tempo changes while playing restart at the beginning; Pause followed by Play also starts from the beginning. Restart does not generate a new composition.
 
-The earlier nonfunctional mood sliders, Track mode/timer and New Track button have been removed, not implemented. Mood shaping, timed composition, recording/audio export, MIDI, and sample loading remain deferred. Melody randomness is not a full procedural composition system. Preset descriptions describe musical ingredients, not verified listening quality. E-minor material is not advertised as phrygian.
+The earlier nonfunctional mood sliders, Track mode/timer and New Track button have been removed, not implemented. Mood shaping, timed composition, recording, MIDI, and sample loading remain deferred. Only finite WAV snapshot export is supported, not recording or general track production. Melody randomness is not a full procedural composition system. Preset descriptions describe musical ingredients, not verified listening quality. E-minor material is not advertised as phrygian.
 
 The engine uses one lazily-created AudioContext and tracks active sources so pause stops existing tails as well as pending drum callbacks. Percussion uses oscillator kicks and filtered noise for hats/snare/clap, with simplified snare tone/clap envelopes; this increment is not sonically identical to the old synth. Output is attenuated, but **start with your device volume low**. This is not a mastered mix or limiter.
 
-JavaScript interval scheduling is not sample-accurate and may drift or throttle in background tabs. No offline playback or native desktop build is provided. Browser audio requires a user gesture and a supported AudioContext. Headless tests do not validate audible output, musical quality, screen-reader behavior, or native Windows rendering. Actual rendered screenshot review and a browser listening check remain release gates; see `DEVELOPMENT_GUIDE.md`.
+JavaScript interval scheduling is not sample-accurate and may drift or throttle in background tabs. No offline app installation or native desktop build is provided. Live browser audio requires a user gesture and a supported AudioContext; WAV rendering separately requires OfflineAudioContext. Headless tests do not validate listening quality, physical devices or screen-reader behavior. Actual rendered screenshot review and a browser listening check remain release gates; see `DEVELOPMENT_GUIDE.md`.
 
 ## Structure
 
-- `src/main.ts`: presets, native synthesis, semantic UI and application state
-- `src/transport.ts`: injectable clock and cancellable sixteenth-step scheduling
+- `src/main.ts`: semantic UI, application/session state and export cancellation
+- `src/music.ts`: shared presets, note planning, native synthesis and lazy live output
+- `src/transport.ts`: shared drum-token expansion, injectable clock and cancellable scheduling
+- `src/wav.ts`: finite offline traversal and bounded stereo PCM WAV encoding
 - `src/session.ts`: bounded versioned codec used by storage and project files
 - `src/style.css`: visual tokens and responsive instrument layout
 - `src/*.test.ts`: behavioral and DOM state tests

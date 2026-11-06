@@ -9,8 +9,8 @@
 .session-files input[type=file]{display:block;width:100%;min-height:48px;max-width:100%;font-size:13px;color:var(--muted)}
 .session-files input[type=file]::file-selector-button{font:inherit;min-height:48px;padding:10px;border:1px solid var(--line);border-radius:8px;background:#202c27;color:#f4f1e9;margin-right:8px;cursor:pointer}
 .session-files input[type=file]:focus-visible{outline:3px solid #ffcb83;outline-offset:5px}
-.session-files #project-error{color:#ffcb83}
-.session-files #project-error:empty,.session-files #project-status:empty{margin:0}
+.session-files #project-error,.session-files #wav-error{color:#ffcb83}
+.session-files #project-error:empty,.session-files #project-status:empty,.session-files #wav-status:empty,.session-files #wav-error:empty{margin:0}
 .master-volume{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;border-top:1px solid var(--line);padding-top:20px}
 .master-volume legend{margin-bottom:0}
 .master-volume label{grid-column:1/-1;font-size:14px;display:flex;justify-content:space-between;align-items:center}

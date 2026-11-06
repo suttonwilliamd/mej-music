@@ -2,106 +2,8 @@ import './style.css'
 import { Transport, tempo, type Speed } from './transport'
 import { decodeSession, defaultSession, encodeSession, MAX_PROJECT_BYTES, SESSION_KEY, type Preset, type Session } from './session'
 
-const PRESETS = {
-  starry: { name: 'Starry', bpm: 80, description: 'A minor · spacious & wandering', bass: ['a1', 'f1', 'c2', 'g1'], chords: [['a3','c4','e4'],['f3','a3','c4'],['c4','e4','g4'],['g3','b3','d4']], melody: ['a4','c5','b4','c5'], chance: 0.1,
-    pattern: ['bd ~ ~ ~','~ ~ sn ~','hh ~ hh ~','~ ~ ~ cp','bd ~ ~ ~','~ sn ~ ~','hh ~ hh ~','~ ~ ~ ~','bd ~ ~ ~','~ ~ sn ~','hh ~ hh ~','~ ~ ~ cp','bd ~ ~ ~','~ sn ~ ~','hh ~ hh ~','~ ~ ~ ~'] },
-  flow: { name: 'Flow', bpm: 90, description: 'C major · steady & open', bass: ['c2','g1','a1','f1'], chords: [['c4','e4','g4'],['g3','b3','d4'],['a3','c4','e4'],['f3','a3','c4']], melody: ['c5','e4','g4','c4'], chance: 0.05,
-    pattern: ['bd ~ bd ~','~ sn ~ ~','hh ~ hh ~','~ ~ ~ cp','bd ~ ~ ~','~ ~ sn ~','hh ~ hh ~','~ ~ ~ ~','bd ~ bd ~','~ sn ~ ~','hh ~ hh ~','~ ~ ~ cp','bd ~ ~ ~','~ ~ sn ~','hh ~ hh ~','~ ~ ~ ~'] },
-  glitch: { name: 'Glitch', bpm: 130, description: 'D minor · restless repetitions', bass: ['d2','g1','a1','e2'], chords: [['d3','f3','a3'],['g3','b3','d4'],['a3','c4','e4'],['e3','g#3','b3']], melody: ['g4','b4','d5','b4'], chance: 0.2,
-    pattern: ['bd*2 ~ bd sn','sn*4 ~ ~ ~','hh*8 ~ ~ ~','cp*4 ~ ~ ~','bd ~ ~ ~','sn ~ sn ~','hh*4 ~ ~ ~','~ ~ ~ cp','bd*2 ~ bd sn','sn*4 ~ ~ ~','hh*8 ~ ~ ~','cp*4 ~ ~ ~','bd ~ ~ sn','sn ~ ~ ~','hh*4 ~ ~ ~','~ ~ ~ ~'] },
-  demon: { name: 'Demon', bpm: 140, description: 'E minor · dense & insistent', bass: ['e1','c2','g1','d2'], chords: [['e3','g3','b3'],['c4','e4','g4'],['g3','b3','d4'],['d3','f3','a3']], melody: ['e3','g3','b3','e4'], chance: 0.15,
-    pattern: ['bd bd bd bd','sn ~ sn ~','hh*8 ~ ~ ~','cp*4 bd*4','bd ~ ~ ~','sn ~ sn ~','hh*4 ~ ~ ~','~ ~ ~ cp','bd bd bd bd','sn ~ sn ~','hh*8 ~ ~ ~','cp*4 bd*4','bd ~ ~ ~','sn ~ sn ~','hh*4 ~ ~ ~','~ ~ ~ ~'] }
-}
-
-/** Browser synthesis only: no samples, Strudel runtime, or desktop wrapper. */
-class AudioEngine {
-  private context: AudioContext | null = null
-  private output: GainNode | null = null
-  private sources = new Set<AudioScheduledSourceNode>()
-  private level = 0.6
-
-  setVolume(volume: number, muted: boolean) {
-    this.level = muted ? 0 : volume / 100 * 0.6
-    if (!this.context || !this.output) return // Settings never unlock/create audio.
-    const now = this.context.currentTime
-    const gain = this.output.gain
-    const current = gain.value
-    gain.cancelScheduledValues(now)
-    gain.setValueAtTime(current, now)
-    gain.linearRampToValueAtTime(this.level, now + 0.015)
-  }
-
-  async resume() {
-    if (!this.context) {
-      this.context = new AudioContext()
-      this.output = this.context.createGain()
-      this.output.gain.value = this.level
-      this.output.connect(this.context.destination)
-    }
-    await this.context.resume()
-  }
-
-  private connect(source: AudioScheduledSourceNode, last: AudioNode, duration: number, intermediate?: AudioNode) {
-    const context = this.context!
-    last.connect(this.output!)
-    this.sources.add(source)
-    source.onended = () => { this.sources.delete(source); source.disconnect(); intermediate?.disconnect(); last.disconnect() }
-    source.start()
-    source.stop(context.currentTime + duration)
-  }
-
-  note(note: string, duration: number, gain: number, type: OscillatorType = 'sawtooth') {
-    if (!this.context) return
-    const match = note.match(/^([a-g]#?)(-?\d)$/)!
-    const frequencies: Record<string, number> = { c:261.63,'c#':277.18,d:293.66,'d#':311.13,e:329.63,f:349.23,'f#':369.99,g:392,'g#':415.30,a:440,'a#':466.16,b:493.88 }
-    const osc = this.context.createOscillator()
-    const envelope = this.context.createGain()
-    osc.type = type
-    osc.frequency.value = frequencies[match[1]] * 2 ** (Number(match[2]) - 4)
-    envelope.gain.setValueAtTime(gain, this.context.currentTime)
-    envelope.gain.exponentialRampToValueAtTime(0.001, this.context.currentTime + duration)
-    osc.connect(envelope)
-    this.connect(osc, envelope, duration)
-  }
-
-  drum(sound: string) {
-    const context = this.context
-    if (!context) return
-    const now = context.currentTime
-    const envelope = context.createGain()
-    if (sound === 'bd') {
-      const osc = context.createOscillator()
-      osc.frequency.setValueAtTime(150, now)
-      osc.frequency.exponentialRampToValueAtTime(0.01, now + 0.5)
-      envelope.gain.setValueAtTime(0.8, now)
-      envelope.gain.exponentialRampToValueAtTime(0.001, now + 0.5)
-      osc.connect(envelope)
-      this.connect(osc, envelope, 0.5)
-      return
-    }
-    const duration = sound === 'hh' ? 0.05 : sound === 'cp' ? 0.1 : 0.2
-    const buffer = context.createBuffer(1, Math.ceil(context.sampleRate * duration), context.sampleRate)
-    const data = buffer.getChannelData(0)
-    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
-    const noise = context.createBufferSource()
-    noise.buffer = buffer
-    const filter = context.createBiquadFilter()
-    filter.type = sound === 'cp' ? 'bandpass' : 'highpass'
-    filter.frequency.value = sound === 'hh' ? 7000 : sound === 'cp' ? 1500 : 1000
-    envelope.gain.setValueAtTime(sound === 'hh' ? 0.25 : 0.3, now)
-    envelope.gain.exponentialRampToValueAtTime(0.001, now + duration)
-    noise.connect(filter)
-    filter.connect(envelope)
-    this.connect(noise, envelope, duration, filter)
-    if (sound === 'sn') this.note('f3', 0.2, 0.18, 'triangle')
-  }
-
-  stop() {
-    // Cancel active tails as well as transport callbacks. No suspended notes to revive.
-    for (const source of this.sources) { source.stop(); source.disconnect() }
-    this.sources.clear()
-  }
-}
+import { AudioEngine, PRESETS, stepNotes } from './music'
+import { renderWav } from './wav'
 
 export interface Instrument {
   resume(): Promise<void>
@@ -123,8 +25,10 @@ export class MeJApp {
   private importRequest = 0
   private volume: number
   private muted: boolean
+  private exportRevision = 0
+  private exporting = false
 
-  constructor(private root: HTMLElement, private audio: Instrument = new AudioEngine()) {
+  constructor(private root: HTMLElement, private audio: Instrument = new AudioEngine(), private renderAudio = renderWav) {
     this.transport = new Transport(window, sound => this.audio.drum(sound))
     let session = defaultSession()
     let storageMessage = 'Changes save automatically in this browser. Downloads are portable.'
@@ -170,6 +74,13 @@ export class MeJApp {
           </fieldset>
           <fieldset class="speed"><legend>Tempo <span>· relative to preset</span></legend>${(['slow','mid','fast'] as const).map(speed => `<label><input type="radio" name="speed" value="${speed}" ${speed === 'mid' ? 'checked' : ''}><span>${speed[0].toUpperCase() + speed.slice(1)}</span></label>`).join('')}</fieldset>
           <fieldset class="presets"><legend>Choose your character</legend>${Object.entries(PRESETS).map(([key,preset], index) => `<label><input type="radio" name="preset" value="${key}" ${key === 'flow' ? 'checked' : ''}><span class="card"><span class="card-number">0${index+1}</span><strong>${preset.name}</strong><span>${preset.description}</span></span></label>`).join('')}</fieldset>
+          <section class="session-files" aria-labelledby="wav-heading">
+            <h3 id="wav-heading">Take one loop with you</h3>
+            <p id="wav-help">One 16-step snapshot from the beginning, with natural note tails. Stereo 44.1 kHz / 16-bit WAV, made locally. Not a recording or seamless loop; randomness can differ.</p>
+            <button id="download-wav" type="button" aria-describedby="wav-help">Download WAV</button>
+            <p id="wav-status" aria-live="polite"></p>
+            <p id="wav-error" role="alert"></p>
+          </section>
           <section class="session-files" aria-labelledby="session-heading">
             <h3 id="session-heading">Keep your session</h3>
             <p id="session-help">Character, tempo, steps, volume and mute. Import and reset pause playback. Reload never starts audio.</p>
@@ -220,6 +131,7 @@ export class MeJApp {
     }))
     root.querySelector('#storage-status')!.textContent = storageMessage
     root.querySelector('#download-project')!.addEventListener('click', () => this.downloadProject())
+    root.querySelector('#download-wav')!.addEventListener('click', () => void this.downloadWav())
     root.querySelector('#import-project')!.addEventListener('change', event => {
       const input = event.target as HTMLInputElement
       const file = input.files?.[0]
@@ -237,10 +149,11 @@ export class MeJApp {
   }
 
   private snapshot(): Session {
-    return { version: 2, preset: this.preset, speed: this.speed, steps: this.mask, volume: this.volume, muted: this.muted }
+    return { version: 2, preset: this.preset, speed: this.speed, steps: [...this.mask], volume: this.volume, muted: this.muted }
   }
 
   private saveSession() {
+    this.invalidateExport()
     try {
       window.localStorage.setItem(SESSION_KEY, encodeSession(this.snapshot()))
       this.root.querySelector('#storage-status')!.textContent = 'Session saved in this browser. Download a project to keep a portable copy.'
@@ -268,6 +181,7 @@ export class MeJApp {
   }
 
   private async importProject(file: File) {
+    this.invalidateExport()
     const request = ++this.importRequest
     try {
       if (file.size > MAX_PROJECT_BYTES) throw new Error('Project exceeds the 4 KiB limit.')
@@ -297,6 +211,45 @@ export class MeJApp {
       this.projectFeedback('Download unavailable in this browser. Your session and playback are unchanged.', true)
     } finally {
       if (url) window.setTimeout(() => URL.revokeObjectURL(url!), 0)
+    }
+  }
+
+  private invalidateExport() {
+    this.exportRevision++
+    this.root.querySelector('#wav-error')!.textContent = ''
+    this.root.querySelector('#wav-status')!.textContent = this.exporting ? 'Export canceled by session change. Wait for rendering to finish, then download again.' : ''
+  }
+
+  private async downloadWav() {
+    if (this.exporting) return
+    const revision = this.exportRevision
+    const snapshot = this.snapshot()
+    const button = this.root.querySelector<HTMLButtonElement>('#download-wav')!
+    this.exporting = true
+    button.disabled = true
+    this.root.querySelector('#wav-error')!.textContent = ''
+    this.root.querySelector('#wav-status')!.textContent = 'Rendering one loop locally… Music controls remain available.'
+    let url: string | undefined
+    try {
+      const bytes = await this.renderAudio(snapshot)
+      if (revision !== this.exportRevision) return
+      url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `mej-${snapshot.preset}-${snapshot.speed}.wav`
+      this.root.append(link)
+      link.click()
+      link.remove()
+      this.root.querySelector('#wav-status')!.textContent = 'WAV download requested. One finite snapshot, not a recording or seamless loop.'
+    } catch {
+      if (revision !== this.exportRevision) return
+      this.root.querySelector('#wav-status')!.textContent = ''
+      this.root.querySelector('#wav-error')!.textContent = 'WAV export failed or is unavailable in this browser. Session and playback unchanged. Try Download WAV again in a supported browser.'
+    } finally {
+      if (url) window.setTimeout(() => URL.revokeObjectURL(url!), 0)
+      this.exporting = false
+      button.disabled = false
+      if (revision !== this.exportRevision) this.root.querySelector('#wav-status')!.textContent = 'Export canceled by session change. Download WAV again for the current settings.'
     }
   }
 
@@ -370,9 +323,7 @@ export class MeJApp {
     this.transport.start(tempo(preset.bpm, this.speed), preset.pattern, (step, enabled) => {
       this.root.querySelectorAll('.step-toggle').forEach((dot, index) => dot.classList.toggle('current', step === index))
       if (!enabled) return
-      if (step % 4 === 0) this.audio.note(preset.bass[Math.floor(step / 4)], 0.5, 0.4)
-      if (step % 8 === 4) preset.chords[Math.floor(step / 4)].forEach(note => this.audio.note(note, 1, 0.15))
-      if (Math.random() < preset.chance) this.audio.note(preset.melody[Math.floor(Math.random() * preset.melody.length)], 0.3, 0.15, 'triangle')
+      for (const note of stepNotes(this.preset, step)) this.audio.note(...note)
     }, step => this.mask[step])
   }
 }

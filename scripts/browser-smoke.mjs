@@ -6,13 +6,14 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { preview } from 'vite'
+import { wavSmoke } from './wav-smoke.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const output = path.resolve(process.env.MEJ_BROWSER_OUTPUT || path.join(root, 'artifacts/browser-smoke'))
 const fault = process.env.MEJ_BROWSER_FAULT || ''
 const artifacts = [], outcomes = [], pageErrors = [], blockedRequests = []
 let browser, server, failure, stage = 'preflight', browserVersion = null, head = null
-let context
+let context, currentPage, diagnostics = null
 const distManifest = []
 async function manifest(directory, prefix = '') {
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
@@ -110,6 +111,7 @@ try {
       }
     })
     const page = await context.newPage()
+    currentPage = page
     page.setDefaultTimeout(8000)
     page.setDefaultNavigationTimeout(10000)
     page.on('pageerror', () => { if (pageErrors.length < 10) pageErrors.push('uncaught browser page error') })
@@ -260,6 +262,10 @@ try {
       const p = window.__mejProbe
       return Math.abs(p.edges.find(([, to]) => to === p.contexts[0].destination)[0].gain.value - 0.222) < 0.00001
     })
+    await page.waitForFunction(() => {
+      const sources = window.__mejProbe.sources
+      return sources.some(source => source instanceof OscillatorNode) && sources.some(source => source instanceof AudioBufferSourceNode)
+    })
     const afterOutput = await masterState()
     assert.equal(afterOutput.intervals, beforeOutput.intervals)
     assert.equal(afterOutput.clears, beforeOutput.clears)
@@ -282,6 +288,21 @@ try {
     const audio = await page.evaluate(() => ({ starts: window.__mejProbe.starts, stops: window.__mejProbe.stops,
       contexts: window.__mejProbe.contexts.map(c => ({ state: c.state, sampleRate: c.sampleRate, currentTime: c.currentTime })) }))
     assert.ok(audio.stops > 0)
+    // A native idle graph must finish output transitions too, without new voices,
+    // a scheduler restart or Play. Previously Chromium could strand a ramp when
+    // the last source disconnected before its endpoint.
+    const idleIntervals = await page.evaluate(() => window.__mejProbe.intervals)
+    await setVolume(52)
+    await page.getByRole('button', { name: 'Unmute output', exact: true }).click()
+    await page.waitForFunction(() => {
+      const p = window.__mejProbe
+      return Math.abs(p.edges.find(([, to]) => to === p.contexts[0].destination)[0].gain.value - 0.312) < 0.00001
+    })
+    assert.equal(await page.evaluate(() => window.__mejProbe.starts), starts)
+    assert.equal(await page.evaluate(() => window.__mejProbe.intervals), idleIntervals)
+    assert.equal(await page.locator('#status').innerText(), 'Paused')
+    await setVolume(37)
+    await page.getByRole('button', { name: 'Mute output', exact: true }).click()
     // Exercise actual browser download and file chooser imports, not an app test seam.
     await page.locator('input[name="preset"][value="demon"]').check()
     await page.locator('input[name="speed"][value="slow"]').check()
@@ -370,6 +391,8 @@ try {
     assert.equal(await page.evaluate(() => window.__mejProbe.contexts.length), 0)
     await setVolume(19)
     assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('mej.session'))), { ...legacy, version: 2, volume: 19, muted: false })
+    stage = `viewport-${width}-wav`
+    const wav = await wavSmoke({ context, origin, width, output, artifacts })
     assert.deepEqual(pageErrors, [])
     assert.deepEqual(blockedRequests, [])
     outcomes.push({ ...dimensions, keyboard: true, resetPreservesTempo: true, mutedNativeDispatch: 0,
@@ -377,13 +400,21 @@ try {
       projectDownloadImport: true, invalidImportPreservesPlayback: true, importedPauseNoLaterDispatch: true,
       feedbackLiveRegionExposed: true, reloadExactAndPaused: true, reloadAudioContexts: 0,
       masterGain: { allSourcesControlled: true, maximum: 0.6, selected37: 0.222, muted: 0, phasePreserved: true, pendingResumeLatest: true, importResetCancellation: true },
+      wav,
       audio })
     await context.close()
     context = null
   }
-} catch {
-  // Deliberately do not persist arbitrary errors, URLs, paths, environment or browser logs.
-  failure = `Smoke failed at ${stage}`
+} catch (error) {
+  // Keep only our source location, never arbitrary browser errors or environment.
+  const location = error instanceof Error ? error.stack?.match(/(?:browser-smoke|wav-smoke)\.mjs:\d+:\d+/)?.[0] : undefined
+  failure = `Smoke failed at ${stage}${location ? ` (${location})` : ''}`
+  diagnostics = await currentPage?.evaluate(() => {
+    const p = window.__mejProbe
+    const context = p?.contexts[0]
+    const master = p?.edges.find(([, to]) => to === context?.destination)?.[0]
+    return { volume: document.querySelector('#volume')?.value, muted: document.querySelector('#mute')?.getAttribute('aria-pressed'), gain: master?.gain.value, contextState: context?.state, contextTime: context?.currentTime, starts: p?.starts, stops: p?.stops, intervals: p?.intervals, clears: p?.clears }
+  }).catch(() => null)
 } finally {
   stage = failure ? stage : 'cleanup'
   try { await context?.close(); await browser?.close() } catch { failure ||= 'Browser cleanup failed' }
@@ -395,12 +426,13 @@ try {
   } catch { failure ||= 'Preview cleanup failed' }
   clearTimeout(deadline)
   await writeFile(path.join(output, 'results.json'), JSON.stringify({
-    qualified: !failure && outcomes.length === 2 && artifacts.length === 8,
+    qualified: !failure && outcomes.length === 2 && artifacts.length === 16,
     platform: process.platform, arch: process.arch, node: process.version, head,
     browser: { name: 'Chromium', version: browserVersion }, fault: fault || null,
     evidenceLimit: 'Muted headless native Web Audio; not listening, device, Edge, screen-reader, sample accuracy or release acceptance. Windows only if platform is win32.',
+    diagnostics,
     distManifest, outcomes, artifacts, pageErrors, blockedRequests, failure,
   }, null, 2) + '\n')
 }
 if (failure) { console.error(failure); process.exitCode = 1 }
-else console.log('Built-dist Chromium smoke passed (2 viewports, 8 PNGs, project download/import/reload).')
+else console.log('Built-dist Chromium smoke passed (2 viewports, 16 PNGs, project sessions/master gain and native WAV download/decode).')

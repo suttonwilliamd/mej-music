@@ -41,12 +41,16 @@ resume/start/stop and invoke the original methods. All-off Play advances markers
 zero source starts; live restore resumes real native dispatch, and Pause leaves no
 new dispatch or marker. A running reused AudioContext after Pause is intentional.
 Keyboard Space/Enter/Tab, visible focus, tempo-preserving pattern reset, page errors and
-horizontal overflow are checked at 1280 and 320 pixels. The eight full-page PNGs show
-paused, keyboard-focused, playing and imported/reloaded session states at each width.
+horizontal overflow are checked at 1280 and 320 pixels. Sixteen full-page PNGs show
+paused, focused, playing, restored-session, WAV-ready and WAV-error states at each width.
 Each isolated viewport context also downloads a real JSON file, resets, imports that
 file through the browser file input, rejects an unsupported file during playback,
 imports successfully to stop the native scheduler, and reloads to exact settings with
 zero AudioContexts created. Chromium output is explicitly muted with `--mute-audio`.
+The separate owned WAV tab downloads and natively decodes actual PCM files, checks
+timing/content, silence, output level, cancellation, failure recovery and live-play
+preservation. It uses seeded fixture randomness for repeatable noise/amplitude
+comparisons, not replacement synthesis; production randomness remains unseeded.
 
 `artifacts/browser-smoke/results.json` is success-only qualification (`qualified: true`
 only after both viewports and cleanup), with Git head, Node/platform/browser identity,
@@ -159,6 +163,87 @@ and inspected the master-output accessibility subtree at both widths; its screen
 show explicit “Muted · selected 1%” feedback, slider and focusable Unmute button.
 The tab and dedicated loopback preview were closed afterward. No recording, mixer,
 limiter, audio export, dependencies, services or user-data changes were introduced.
+
+### Finite WAV snapshot acceptance (November 6, 2026)
+
+Baseline is published `020244a73bd697d8652e6655eaf358b2afd16aa0`, same
+`overnight/2026-11-06-session-files` branch. Final clean full checks passed
+**86 tests in six files**, TypeScript/Vite build (eight modules), and the complete
+built-dist Chromium session/master-gain/WAV suite. Local environment remains
+Windows x64, Node 24.20.0 and Chromium 156.0.8078.4, externally muted.
+
+`music.ts` owns one shared set of presets, tonal-step planning and native voices;
+`transport.ts` shares token expansion with `wav.ts`, preserving simultaneous plain
+tokens and within-step subdivisions. Live immediate source starts, first-tick
+delay, cancellation and phase behavior are retained. Offline scheduling begins
+at zero and reserves the greater of all 16 steps and every actual envelope end.
+Current minimum BPM is 60; 16 steps plus the maximum one-second envelope give
+the conservative five-second / 220,500-frame bound. Actual allocation follows the
+scheduled plan, not a long fixed recording window. See README for PCM format,
+volume/mute, natural tails, randomness, cancellation and explicit-attempt recovery.
+Session v2 and storage format are unchanged.
+
+New tests independently check RIFF sizes/header fields, signed clipping and
+channel interleaving, non-finite/invalid PCM rejection, literal masked drum
+subdivisions, chord-tail duration, every preset/speed frame/event bound and all-off
+planning. DOM tests cover immutable snapshots; no audio unlock/save/phase change;
+single pending work; stale success and error after every setting/import/reset
+transition; and render/download failure recovery during playback. One existing
+import test now selects its project alert specifically because WAV adds a second
+independent alert; its original preservation assertions are unchanged.
+
+The final `artifacts/browser-smoke/results.json` is `qualified: true` and records
+dist hashes, **16 PNGs**, both viewport outcomes and **22 retained WAV downloads**
+with real decoded durations/channels/rates, PCM peaks/nonzero counts and hashes.
+Examples: Flow single-step span is 117,600 frames (2⅔ seconds); all-off Starry/Slow
+is 176,400 frames (four seconds); Demon/Fast step 13's chord lasts 89,460 frames
+(about 2.02857 seconds), beyond its 16-step span. Glitch/Fast subdivisions contain
+real filtered-noise PCM at each expected onset. Both channels are validated;
+37% scales the non-clipped single-step peak by 0.37; zero, muted and all-off files
+contain exactly zero signed PCM samples. Native `decodeAudioData` accepts every
+retained file. These are event/content checks, not listening-quality claims.
+
+Native render completion is gated only in the harness to test one-pending
+behavior, ongoing live markers/unchanged scheduler and contexts/storage, canceled
+success/error, render failure during playback and next-explicit-attempt recovery
+from missing OfflineAudioContext, rejected native completion and non-finite encoding.
+The actual native context/render/nodes are still called. Initial empty WAV status
+and populated alert are checked in Chromium's accessibility tree; Enter activates
+the native button. Desktop/320px full-page ready/error screenshots were inspected;
+button targets remain at least 44px and there is no horizontal overflow.
+
+Two fixture issues were distinguished from product defects. An import helper's
+old “Project imported” message could satisfy a later import wait before new file
+IO finished; it now observes the next feedback mutation. The existing graph test
+could assert source types before the first noise step dispatched; it now waits
+for actual oscillator and buffer sources, keeping the same graph/gain assertions.
+No wording/implementation expectations were re-pinned or relaxed.
+
+**Native idle-ramp correction:** full regression also exposed a real baseline
+Chromium defect. Disconnecting the final voice before a 15ms ramp ended could
+strand gain at 0.157558 instead of 0.222; a later native oscillator's analysed
+PCM also stayed at that wrong amplitude, not merely a stale getter. The observed
+before/after statistics and procedure are preserved in
+`artifacts/browser-smoke/native-idle-ramp-reproduction.json`; the temporary
+baseline archive and diagnostic script were removed. Explicit automation endpoint
+events/intrinsic-value assignment did not fix it.
+
+Live output now coalesces a **zero-offset ConstantSource only through the existing
+master ramp plus one 128-frame render quantum**. Offset is zero before start;
+it creates/resumes no context, adds no audible signal/timer/voice, is reused
+during rapid edits and stops/disconnects after the bounded transition. Pause
+does not cut it early, and an older onended handler cannot clear a newer source.
+The cost is brief native graph processing and a small source allocation when a
+live output transition needs one, not an indefinitely active silent node.
+Real app-master Analyser tests at both widths prove idle/gap/final PCM exactly
+zero, endpoint and subsequent/restored sine peaks approximately 0.222, mute
+exactly zero across Pause, 22 rapid settings/mute actions coalescing to one node,
+zero offsets, bounded stop times and no pending transition afterward. Existing
+pending-resume/import/reset and full session/master regressions also pass.
+
+All tabs, contexts, native fixture nodes and loopback servers are owned/disposed.
+No microphone/system capture, dependencies, schema changes, live-data access,
+listening, device/screen-reader, other-browser or hosted-CI qualification is claimed.
 
 
 ## Visual direction
