@@ -1,5 +1,6 @@
 import './style.css'
 import { Transport, tempo, type Speed } from './transport'
+import { decodeSession, defaultSession, encodeSession, MAX_PROJECT_BYTES, SESSION_KEY, type Preset, type Session } from './session'
 
 const PRESETS = {
   starry: { name: 'Starry', bpm: 80, description: 'A minor · spacious & wandering', bass: ['a1', 'f1', 'c2', 'g1'], chords: [['a3','c4','e4'],['f3','a3','c4'],['c4','e4','g4'],['g3','b3','d4']], melody: ['a4','c5','b4','c5'], chance: 0.1,
@@ -11,7 +12,6 @@ const PRESETS = {
   demon: { name: 'Demon', bpm: 140, description: 'E minor · dense & insistent', bass: ['e1','c2','g1','d2'], chords: [['e3','g3','b3'],['c4','e4','g4'],['g3','b3','d4'],['d3','f3','a3']], melody: ['e3','g3','b3','e4'], chance: 0.15,
     pattern: ['bd bd bd bd','sn ~ sn ~','hh*8 ~ ~ ~','cp*4 bd*4','bd ~ ~ ~','sn ~ sn ~','hh*4 ~ ~ ~','~ ~ ~ cp','bd bd bd bd','sn ~ sn ~','hh*8 ~ ~ ~','cp*4 bd*4','bd ~ ~ ~','sn ~ sn ~','hh*4 ~ ~ ~','~ ~ ~ ~'] }
 }
-type Preset = keyof typeof PRESETS
 
 /** Browser synthesis only: no samples, Strudel runtime, or desktop wrapper. */
 class AudioEngine {
@@ -99,17 +99,36 @@ export interface Instrument {
 }
 
 export class MeJApp {
-  private preset: Preset = 'flow'
-  private speed: Speed = 'mid'
+  private preset: Preset
+  private speed: Speed
   private playing = false
   private ready = false
   private request = 0
   private transport: Transport
   // One session-wide groove mask. Preset/tempo/restart/pause do not replace edits.
-  private mask = Array<boolean>(16).fill(true)
+  private mask: boolean[]
+  private importRequest = 0
 
   constructor(private root: HTMLElement, private audio: Instrument = new AudioEngine()) {
     this.transport = new Transport(window, sound => this.audio.drum(sound))
+    let session = defaultSession()
+    let storageMessage = 'Changes save automatically in this browser. Downloads are portable.'
+    try {
+      const saved = window.localStorage.getItem(SESSION_KEY)
+      if (saved !== null) {
+        try {
+          session = decodeSession(saved)
+          storageMessage = 'Saved session restored, paused. Changes save automatically in this browser.'
+        } catch {
+          storageMessage = 'Saved session is invalid or unsupported. Using defaults; it is replaced only when you edit, import or reset.'
+        }
+      }
+    } catch {
+      storageMessage = 'Browser storage unavailable. You can still play and download projects; changes may not survive reload.'
+    }
+    this.preset = session.preset
+    this.speed = session.speed
+    this.mask = session.steps
     root.innerHTML = `
       <header><a class="wordmark" href="./" aria-label="MeJ home">MeJ<span> / </span></a><span class="edition">A small generative instrument · 0.1</span></header>
       <main>
@@ -126,6 +145,16 @@ export class MeJApp {
           <div class="transport"><button id="play" class="primary" aria-label="Play music" aria-pressed="false"><span aria-hidden="true">▶</span> <span id="play-label">Play</span></button><button id="restart" aria-label="Restart loop from beginning">↺ <span>Restart</span></button><p id="status" role="status" aria-live="polite">Paused</p></div>
           <fieldset class="speed"><legend>Tempo <span>· relative to preset</span></legend>${(['slow','mid','fast'] as const).map(speed => `<label><input type="radio" name="speed" value="${speed}" ${speed === 'mid' ? 'checked' : ''}><span>${speed[0].toUpperCase() + speed.slice(1)}</span></label>`).join('')}</fieldset>
           <fieldset class="presets"><legend>Choose your character</legend>${Object.entries(PRESETS).map(([key,preset], index) => `<label><input type="radio" name="preset" value="${key}" ${key === 'flow' ? 'checked' : ''}><span class="card"><span class="card-number">0${index+1}</span><strong>${preset.name}</strong><span>${preset.description}</span></span></label>`).join('')}</fieldset>
+          <section class="session-files" aria-labelledby="session-heading">
+            <h3 id="session-heading">Keep your session</h3>
+            <p id="session-help">Character, tempo and steps only. Import and reset pause playback. Reload never starts audio.</p>
+            <div class="session-actions"><button id="download-project" type="button">Download project JSON</button><button id="reset-session" type="button">Reset session to defaults</button></div>
+            <label for="import-project">Import project JSON <span>· replaces this session after validation</span></label>
+            <input id="import-project" type="file" accept=".json,application/json" aria-describedby="session-help">
+            <p id="storage-status" aria-live="polite"></p>
+            <p id="project-status" aria-live="polite"></p>
+            <p id="project-error" role="alert"></p>
+          </section>
         </section>
         <aside><strong>Just the essentials.</strong> Continuous playback with synthesized drums, bass, chords and occasional melody. Mood shaping, timed tracks, recording and “New Track” generation aren’t available in this version.</aside>
       </main><footer>Made in your browser. No samples, no account.<span>Start with your volume low.</span></footer>`
@@ -133,25 +162,103 @@ export class MeJApp {
       const step = Number(button.dataset.step)
       this.mask[step] = !this.mask[step]
       this.updatePattern()
+      this.saveSession()
     }))
     root.querySelector('#reset-pattern')!.addEventListener('click', () => {
       this.mask.fill(true)
       this.updatePattern()
+      this.saveSession()
     })
     root.querySelector('#play')!.addEventListener('click', () => this.playing ? this.pause() : void this.play())
     root.querySelector('#restart')!.addEventListener('click', () => { if (this.playing) this.startLoop() })
     root.querySelectorAll<HTMLInputElement>('input[name="speed"]').forEach(input => input.addEventListener('change', () => {
       this.speed = input.value as Speed
       this.update()
+      this.saveSession()
       if (this.playing) this.startLoop()
     }))
     root.querySelectorAll<HTMLInputElement>('input[name="preset"]').forEach(input => input.addEventListener('change', () => {
       this.preset = input.value as Preset
       this.update()
+      this.saveSession()
       if (this.playing) this.startLoop()
     }))
+    root.querySelector('#storage-status')!.textContent = storageMessage
+    root.querySelector('#download-project')!.addEventListener('click', () => this.downloadProject())
+    root.querySelector('#import-project')!.addEventListener('change', event => {
+      const input = event.target as HTMLInputElement
+      const file = input.files?.[0]
+      input.value = ''
+      if (file) void this.importProject(file)
+    })
+    root.querySelector('#reset-session')!.addEventListener('click', () => {
+      this.importRequest++
+      this.replaceSession(defaultSession())
+      this.projectFeedback('Session reset: Flow, Mid, all 16 steps on. Paused.')
+    })
     this.updatePattern()
     this.update()
+  }
+
+  private snapshot(): Session {
+    return { version: 1, preset: this.preset, speed: this.speed, steps: this.mask }
+  }
+
+  private saveSession() {
+    try {
+      window.localStorage.setItem(SESSION_KEY, encodeSession(this.snapshot()))
+      this.root.querySelector('#storage-status')!.textContent = 'Session saved in this browser. Download a project to keep a portable copy.'
+    } catch {
+      this.root.querySelector('#storage-status')!.textContent = 'Session not saved: browser storage unavailable or full. You can still play and download your project.'
+    }
+  }
+
+  private projectFeedback(message: string, error = false) {
+    this.root.querySelector('#project-error')!.textContent = error ? message : ''
+    this.root.querySelector('#project-status')!.textContent = error ? '' : message
+  }
+
+  private replaceSession(session: Session) {
+    this.pause() // Invalidates pending resume and cancels active tails/repetitions.
+    this.preset = session.preset
+    this.speed = session.speed
+    this.mask = session.steps
+    this.updatePattern()
+    this.update()
+    this.saveSession()
+  }
+
+  private async importProject(file: File) {
+    const request = ++this.importRequest
+    try {
+      if (file.size > MAX_PROJECT_BYTES) throw new Error('Project exceeds the 4 KiB limit.')
+      const session = decodeSession(await file.text())
+      if (request !== this.importRequest) return
+      this.replaceSession(session)
+      this.projectFeedback('Project imported. Paused; press Play when ready.')
+    } catch (error) {
+      if (request !== this.importRequest) return
+      this.projectFeedback(`Import failed. Current session and playback unchanged. ${error instanceof Error ? error.message : 'File could not be read.'}`, true)
+    }
+  }
+
+  private downloadProject() {
+    let url: string | undefined
+    try {
+      const blob = new Blob([encodeSession(this.snapshot())], { type: 'application/json' })
+      url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'mej-project.json'
+      this.root.append(link)
+      link.click()
+      link.remove()
+      this.projectFeedback('Project download requested. Keep the JSON file to import on another browser.')
+    } catch {
+      this.projectFeedback('Download unavailable in this browser. Your session and playback are unchanged.', true)
+    } finally {
+      if (url) window.setTimeout(() => URL.revokeObjectURL(url!), 0)
+    }
   }
 
   private updatePattern() {
@@ -163,6 +270,8 @@ export class MeJApp {
   }
 
   private update() {
+    this.root.querySelectorAll<HTMLInputElement>('input[name="preset"]').forEach(input => { input.checked = input.value === this.preset })
+    this.root.querySelectorAll<HTMLInputElement>('input[name="speed"]').forEach(input => { input.checked = input.value === this.speed })
     this.root.querySelector('#bpm')!.textContent = String(tempo(PRESETS[this.preset].bpm, this.speed))
     this.root.querySelector('#preset-name')!.textContent = PRESETS[this.preset].name
     this.root.querySelector('#play')!.setAttribute('aria-pressed', String(this.playing))

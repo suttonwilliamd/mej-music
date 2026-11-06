@@ -40,9 +40,13 @@ browser/server. It does not substitute audio implementations: wrappers observe n
 resume/start/stop and invoke the original methods. All-off Play advances markers with
 zero source starts; live restore resumes real native dispatch, and Pause leaves no
 new dispatch or marker. A running reused AudioContext after Pause is intentional.
-Keyboard Space/Enter/Tab, visible focus, tempo-preserving reset, page errors and
-horizontal overflow are checked at 1280 and 320 pixels. The six full-page PNGs show
-paused, keyboard-focused and playing states at each width.
+Keyboard Space/Enter/Tab, visible focus, tempo-preserving pattern reset, page errors and
+horizontal overflow are checked at 1280 and 320 pixels. The eight full-page PNGs show
+paused, keyboard-focused, playing and imported/reloaded session states at each width.
+Each isolated viewport context also downloads a real JSON file, resets, imports that
+file through the browser file input, rejects an unsupported file during playback,
+imports successfully to stop the native scheduler, and reloads to exact settings with
+zero AudioContexts created. Chromium output is explicitly muted with `--mute-audio`.
 
 `artifacts/browser-smoke/results.json` is success-only qualification (`qualified: true`
 only after both viewports and cleanup), with Git head, Node/platform/browser identity,
@@ -60,11 +64,60 @@ for fail-closed regression checks (no application assertions are disabled). An i
 executable likewise must fail at launch. These probes do not qualify any platform.
 
 Muted headless output is not listening/device, Edge, screen-reader, sample-accuracy or
-release acceptance. Root owns review/push and actual hosted Windows verification;
-BobRoss must independently assess the actual hosted Windows images, not substitute
-these local Linux captures. No app/synthesis/preset/test semantics are changed.
+release acceptance. Aaron owns independent review/publication and hosted CI verification;
+local browser evidence does not substitute for a successful hosted job or listening check.
 
 The transport accepts an injected Clock and hit callback; tests assert concrete expected millisecond durations, not a copy of the implementation formula. A generation token guards stale callbacks even if clock cancellation races. The UI accepts an injected Instrument so state and asynchronous resume failure/cancellation can be tested without real audio hardware.
+
+### Session persistence acceptance (November 6, 2026)
+
+The local Windows run used Node 24.20.0 and Chromium 156.0.8078.4. `npm test`
+passed **54 tests across four files**, and `npm run build` passed. The prior reload
+regression was reproduced before implementation: an edited Demon/Slow session
+reopened as Flow. The completed regression restores Demon/Slow and the exact mask,
+paused. Initial final-check failures were jsdom's queued storage-event tasks being
+counted as audio timers; test interaction helpers now deliver those zero-delay tasks
+without advancing transport ticks, retaining the cancellation assertions.
+
+`npm run test:browser` passed on `platform: "win32"` using production `dist`,
+ephemeral loopback and fresh isolated contexts. `artifacts/browser-smoke/results.json`
+records dist/image hashes and both outcomes; eight PNGs and two actual exported
+project files are beside it. `1280-session-restored.png` and
+`320-session-restored.png` were inspected: Demon, 105 BPM, Slow, step 1 off,
+15 enabled steps and paused state remain visible without horizontal overflow.
+An additional owned browser-helper tab imported the actual desktop export and
+reloaded, then was closed; its dedicated preview server was stopped. This is local
+Windows browser evidence, not a claim about a new hosted CI job.
+
+The real native AudioContext reached `running`; all-off dispatch started zero sources,
+live restore dispatched real sources, Pause/import stopped later dispatch, and reload
+created no context. Output was muted, not listened to. No audible-quality, physical
+device, screen-reader or sample-accuracy claim follows from this smoke.
+
+Session unit/DOM coverage includes malformed JSON, unsupported/missing versions,
+extra/missing fields, enum and boolean-mask boundaries, the 4096-character ASCII
+format boundary, independent decoded/default arrays, exact reload, invalid saved
+data preservation, blocked storage access, quota recovery, unreadable/oversized files,
+invalid-import playback preservation, stale file reads, pending-resume import races,
+cancellation of queued drum repetitions, imported timing/notes and explicit reset.
+The file-read and audio-start races use controlled promises in DOM tests; native
+browser smoke covers actual file IO and scheduler behavior, not a simulated delayed
+browser audio-permission dialog.
+
+Independent review caught empty project feedback being removed from the accessibility
+tree with `display: none`. Empty feedback now collapses only its margins, so its live
+region exists before a message is added. A real Chromium accessibility-tree regression
+failed against the former CSS and passed after correction at both widths, checking
+the empty polite region initially and again after a rejected import. The final build
+and complete browser smoke passed after the fix. This checks browser exposure, not
+actual announcements by a particular screen reader.
+
+See README for the `mej.session` key, v1 JSON schema, 4 KiB file cap, storage privacy
+and reset semantics. No state is uploaded, no dependencies were added, and projects
+do not serialize audio, transport state or melody randomness. For future changes,
+keep validation before state mutation, keep imports paused, preserve invalid-import
+playback, and test storage failure independently of audio availability.
+
 
 ## Visual direction
 

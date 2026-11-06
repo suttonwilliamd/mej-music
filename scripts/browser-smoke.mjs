@@ -49,7 +49,7 @@ try {
   server = await preview({ root, configFile: false, preview: { host: '127.0.0.1', port: 0, strictPort: true, open: false } })
   const origin = `http://127.0.0.1:${server.httpServer.address().port}`
   stage = 'browser-launch'
-  browser = await chromium.launch({ headless: true, timeout: 15000,
+  browser = await chromium.launch({ headless: true, args: ['--mute-audio'], timeout: 15000,
     executablePath: process.env.MEJ_BROWSER_EXECUTABLE || undefined })
   browserVersion = browser.version()
   for (const width of [1280, 320]) {
@@ -118,6 +118,21 @@ try {
     }
     const first = page.getByRole('button', { name: 'Step 1', exact: true })
     await first.waitFor()
+    // Empty feedback must already exist in Chromium's accessibility tree before
+    // its first update; revealing populated live regions can lose announcements.
+    const feedbackExposed = async () => {
+      const cdp = await context.newCDPSession(page)
+      try {
+        const { root } = await cdp.send('DOM.getDocument')
+        const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#project-status' })
+        const { nodes } = await cdp.send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false })
+        assert.equal(nodes[0]?.ignored, false, 'Project feedback must remain exposed while empty')
+        assert.ok(nodes[0].properties.some(property => property.name === 'live' && property.value.value === 'polite'))
+      } finally {
+        await cdp.detach()
+      }
+    }
+    await feedbackExposed()
     assert.equal(await page.locator('.step-toggle').count(), 16)
     await capture('paused')
     await first.focus()
@@ -168,10 +183,57 @@ try {
     const audio = await page.evaluate(() => ({ starts: window.__mejProbe.starts, stops: window.__mejProbe.stops,
       contexts: window.__mejProbe.contexts.map(c => ({ state: c.state, sampleRate: c.sampleRate, currentTime: c.currentTime })) }))
     assert.ok(audio.stops > 0)
+    // Exercise actual browser download and file chooser imports, not an app test seam.
+    await page.locator('input[name="preset"][value="demon"]').check()
+    await page.locator('input[name="speed"][value="slow"]').check()
+    const expected = { version: 1, preset: 'demon', speed: 'slow', steps: [false, ...Array(15).fill(true)] }
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Download project JSON', exact: true }).click()
+    const download = await downloadPromise
+    assert.equal(download.suggestedFilename(), 'mej-project.json')
+    const projectPath = path.join(output, `${width}-project.json`)
+    await download.saveAs(projectPath)
+    assert.deepEqual(JSON.parse(await readFile(projectPath, 'utf8')), expected)
+    await page.getByRole('button', { name: 'Reset session to defaults', exact: true }).click()
+    assert.equal(await page.locator('#preset-name').innerText(), 'Flow')
+    assert.equal(await page.locator('.step-toggle[aria-pressed="true"]').count(), 16)
+    await page.locator('#import-project').setInputFiles(projectPath)
+    await page.waitForFunction(() => document.querySelector('#project-status')?.textContent.includes('Project imported'))
+    assert.equal(await page.locator('#preset-name').innerText(), 'Demon')
+    assert.equal(await page.locator('#bpm').innerText(), '105')
+    assert.equal(await page.getByRole('status').innerText(), 'Paused')
+    assert.equal(await first.getAttribute('aria-pressed'), 'false')
+    // Malformed import must preserve a live run and the persisted session.
+    await page.getByRole('button', { name: 'Play music', exact: true }).click()
+    await page.waitForFunction(() => document.querySelector('#status')?.textContent === 'Playing')
+    await page.locator('#import-project').setInputFiles({ name: 'invalid.json', mimeType: 'application/json', buffer: Buffer.from('{"version":99}') })
+    await page.waitForFunction(() => document.querySelector('#project-error')?.textContent.includes('Import failed'))
+    assert.equal(await page.getByRole('status').innerText(), 'Playing')
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('mej.session'))), expected)
+    await feedbackExposed()
+    // Valid import stops the real scheduler and nodes, without a later resurrection.
+    await page.locator('#import-project').setInputFiles(projectPath)
+    await page.waitForFunction(() => document.querySelector('#status')?.textContent === 'Paused')
+    const importedStarts = await page.evaluate(() => window.__mejProbe.starts)
+    await page.waitForTimeout(400)
+    assert.equal(await page.evaluate(() => window.__mejProbe.starts), importedStarts)
+    assert.equal(await page.locator('.step-toggle.current').count(), 0)
+    await page.reload({ waitUntil: 'networkidle' })
+    assert.equal(await page.locator('#preset-name').innerText(), 'Demon')
+    assert.equal(await page.locator('#bpm').innerText(), '105')
+    assert.equal(await page.locator('input[name="speed"][value="slow"]').isChecked(), true)
+    assert.equal(await page.getByRole('status').innerText(), 'Paused')
+    assert.equal(await page.locator('.step-toggle[aria-pressed="true"]').count(), 15)
+    assert.equal(await first.getAttribute('aria-pressed'), 'false')
+    assert.equal(await page.evaluate(() => window.__mejProbe.contexts.length), 0)
+    await capture('session-restored')
+    await noOverflow()
     assert.deepEqual(pageErrors, [])
     assert.deepEqual(blockedRequests, [])
     outcomes.push({ ...dimensions, keyboard: true, resetPreservesTempo: true, mutedNativeDispatch: 0,
-      liveEditNativeDispatch: true, pauseNoLaterDispatch: true, markerCleanup: true, audio })
+      liveEditNativeDispatch: true, pauseNoLaterDispatch: true, markerCleanup: true,
+      projectDownloadImport: true, invalidImportPreservesPlayback: true, importedPauseNoLaterDispatch: true,
+      feedbackLiveRegionExposed: true, reloadExactAndPaused: true, reloadAudioContexts: 0, audio })
     await context.close()
     context = null
   }
@@ -189,7 +251,7 @@ try {
   } catch { failure ||= 'Preview cleanup failed' }
   clearTimeout(deadline)
   await writeFile(path.join(output, 'results.json'), JSON.stringify({
-    qualified: !failure && outcomes.length === 2 && artifacts.length === 6,
+    qualified: !failure && outcomes.length === 2 && artifacts.length === 8,
     platform: process.platform, arch: process.arch, node: process.version, head,
     browser: { name: 'Chromium', version: browserVersion }, fault: fault || null,
     evidenceLimit: 'Muted headless native Web Audio; not listening, device, Edge, screen-reader, sample accuracy or release acceptance. Windows only if platform is win32.',
@@ -197,4 +259,4 @@ try {
   }, null, 2) + '\n')
 }
 if (failure) { console.error(failure); process.exitCode = 1 }
-else console.log('Built-dist Chromium smoke passed (2 viewports, 6 PNGs).')
+else console.log('Built-dist Chromium smoke passed (2 viewports, 8 PNGs, project download/import/reload).')

@@ -3,12 +3,16 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { MeJApp, type Instrument } from './main'
 
 function setup(resume = () => Promise.resolve()) {
+  localStorage.clear()
   vi.useFakeTimers()
   const root = document.createElement('div')
   document.body.replaceChildren(root)
   const audio: Instrument = { resume, stop: vi.fn(), drum: vi.fn(), note: vi.fn() }
   new MeJApp(root, audio)
-  const click = (selector: string) => root.querySelector<HTMLButtonElement>(selector)!.click()
+  const click = (selector: string) => {
+    root.querySelector<HTMLButtonElement>(selector)!.click()
+    vi.advanceTimersByTime(0) // Deliver jsdom storage-event tasks, not transport ticks.
+  }
   return { root, audio, click }
 }
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); document.body.replaceChildren() })
