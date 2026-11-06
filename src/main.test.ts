@@ -7,7 +7,7 @@ function setup(resume = () => Promise.resolve()) {
   vi.useFakeTimers()
   const root = document.createElement('div')
   document.body.replaceChildren(root)
-  const audio: Instrument = { resume, stop: vi.fn(), drum: vi.fn(), note: vi.fn() }
+  const audio: Instrument = { resume, setVolume: vi.fn(), stop: vi.fn(), drum: vi.fn(), note: vi.fn() }
   new MeJApp(root, audio)
   const click = (selector: string) => {
     root.querySelector<HTMLButtonElement>(selector)!.click()

@@ -6,7 +6,7 @@ import { defaultSession, encodeSession, SESSION_KEY } from './session'
 function setup(resume = () => Promise.resolve()) {
   const root = document.createElement('div')
   document.body.replaceChildren(root)
-  const audio: Instrument = { resume: vi.fn(resume), stop: vi.fn(), drum: vi.fn(), note: vi.fn() }
+  const audio: Instrument = { resume: vi.fn(resume), setVolume: vi.fn(), stop: vi.fn(), drum: vi.fn(), note: vi.fn() }
   new MeJApp(root, audio)
   vi.advanceTimersByTime(0) // Deliver jsdom storage events separately from audio scheduling.
   const click = (selector: string) => {
@@ -165,7 +165,7 @@ it('retains current edits when quota is exhausted and retries a later save', () 
   expect(mask(root)[0]).toBe(false)
   set.mockRestore()
   click('input[value="fast"]')
-  expect(JSON.parse(localStorage.getItem(SESSION_KEY)!)).toEqual({ version: 1, preset: 'demon', speed: 'fast', steps: [false,...Array(15).fill(true)] })
+  expect(JSON.parse(localStorage.getItem(SESSION_KEY)!)).toEqual({ ...defaultSession(), preset: 'demon', speed: 'fast', steps: [false,...Array(15).fill(true)] })
   expect(root.querySelector('#storage-status')!.textContent).toContain('Session saved')
 })
 
@@ -183,4 +183,109 @@ it('distinguishes live pattern restore from full paused session reset and persis
   expect(mask(root)).toEqual(Array(16).fill(true))
   expect(localStorage.getItem(SESSION_KEY)).toBe(encodeSession(defaultSession()))
   expect(vi.getTimerCount()).toBe(0)
+})
+
+function volume(root: HTMLElement, value: number) {
+  const input = root.querySelector<HTMLInputElement>('#volume')!
+  input.value = String(value)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  vi.advanceTimersByTime(0)
+}
+
+it('migrates v1 local progress and files to paused v2 without starting audio', async () => {
+  const old = { version: 1, preset: 'demon', speed: 'slow', steps: [false, ...Array(15).fill(true)] }
+  localStorage.setItem(SESSION_KEY, JSON.stringify(old))
+  const { root, audio, click } = setup()
+  expect(root.querySelector('#preset-name')!.textContent).toBe('Demon')
+  expect(root.querySelector('#bpm')!.textContent).toBe('105')
+  expect(mask(root)).toEqual(old.steps)
+  expect(audio.setVolume).toHaveBeenLastCalledWith(100, false)
+  expect(audio.resume).not.toHaveBeenCalled()
+  volume(root, 37); click('#mute')
+  const expected = { ...old, version: 2, volume: 37, muted: true }
+  expect(JSON.parse(localStorage.getItem(SESSION_KEY)!)).toEqual(expected)
+  const reloaded = setup()
+  expect(reloaded.root.querySelector('#volume-state')!.textContent).toBe('Muted · selected 37%')
+  expect(reloaded.audio.setVolume).toHaveBeenLastCalledWith(37, true)
+  expect(reloaded.audio.resume).not.toHaveBeenCalled()
+  await importFile(reloaded.root, JSON.stringify(old))
+  expect(reloaded.root.querySelector('#status')!.textContent).toBe('Paused')
+  expect(reloaded.audio.setVolume).toHaveBeenLastCalledWith(100, false)
+  expect(JSON.parse(localStorage.getItem(SESSION_KEY)!)).toEqual({ ...old, version: 2, volume: 100, muted: false })
+})
+
+it('keeps live volume and mute phase, notes, preset, speed and edits while continuing muted dispatch', async () => {
+  vi.spyOn(Math, 'random').mockReturnValue(0.99)
+  const { root, audio, click } = setup()
+  click('[data-step="15"]')
+  click('#play'); await Promise.resolve()
+  vi.advanceTimersByTime(167)
+  const stops = vi.mocked(audio.stop).mock.calls.length
+  const noteCount = vi.mocked(audio.note).mock.calls.length
+  volume(root, 37); click('#mute')
+  expect(audio.setVolume).toHaveBeenLastCalledWith(37, true)
+  expect(audio.stop).toHaveBeenCalledTimes(stops)
+  expect(audio.note).toHaveBeenCalledTimes(noteCount)
+  expect(root.querySelector('[data-step="0"]')!.classList.contains('current')).toBe(true)
+  vi.advanceTimersByTime(167)
+  expect(root.querySelector('[data-step="1"]')!.classList.contains('current')).toBe(true)
+  expect(audio.drum).toHaveBeenLastCalledWith('sn')
+  volume(root, 42)
+  expect(root.querySelector('#volume-state')!.textContent).toBe('Muted · selected 42%')
+  click('#mute')
+  expect(audio.setVolume).toHaveBeenLastCalledWith(42, false)
+  vi.advanceTimersByTime(167)
+  expect(root.querySelector('[data-step="2"]')!.classList.contains('current')).toBe(true)
+  expect(root.querySelector('#status')!.textContent).toBe('Playing')
+  expect(root.querySelector('#bpm')!.textContent).toBe('90')
+  expect(mask(root)[15]).toBe(false)
+  expect(audio.stop).toHaveBeenCalledTimes(stops)
+  volume(root, 0)
+  expect(root.querySelector('#volume-state')!.textContent).toBe('Silent · volume 0%')
+})
+
+it('uses latest output across pending resume, invalid import, successful import and reset cancellation', async () => {
+  const resumes: Array<() => void> = []
+  const { root, audio, click } = setup(() => new Promise<void>(resolve => resumes.push(resolve)))
+  volume(root, 23); click('#mute')
+  expect(audio.resume).not.toHaveBeenCalled()
+  click('#play'); volume(root, 41); click('#mute')
+  expect(audio.setVolume).toHaveBeenLastCalledWith(41, false)
+  await importFile(root, JSON.stringify({ ...defaultSession(), volume: 101 }))
+  expect(root.querySelector('#status')!.textContent).toBe('Starting…')
+  expect(audio.setVolume).toHaveBeenLastCalledWith(41, false)
+  resumes[0](); await Promise.resolve(); vi.advanceTimersByTime(167)
+  expect(audio.drum).toHaveBeenCalled()
+  click('#play'); click('#play')
+  const imported = { ...defaultSession(), volume: 18, muted: true }
+  await importFile(root, encodeSession(imported))
+  expect(audio.setVolume).toHaveBeenLastCalledWith(18, true)
+  resumes[1](); await Promise.resolve()
+  expect(root.querySelector('#status')!.textContent).toBe('Paused')
+  expect(vi.getTimerCount()).toBe(0)
+  click('#play'); volume(root, 62)
+  click('#reset-session')
+  expect(audio.setVolume).toHaveBeenLastCalledWith(100, false)
+  resumes[2](); await Promise.resolve()
+  expect(root.querySelector('#status')!.textContent).toBe('Paused')
+  expect(vi.getTimerCount()).toBe(0)
+  expect(localStorage.getItem(SESSION_KEY)).toBe(encodeSession(defaultSession()))
+})
+
+it('never creates an AudioContext for initial settings, edits, imports, reset or reload before Play', async () => {
+  const create = vi.fn(() => { throw Error('AudioContext must stay lazy') })
+  vi.stubGlobal('AudioContext', create)
+  try {
+    localStorage.setItem(SESSION_KEY, encodeSession({ ...defaultSession(), volume: 17, muted: true }))
+    const root = document.createElement('div')
+    document.body.replaceChildren(root)
+    new MeJApp(root)
+    volume(root, 62)
+    root.querySelector<HTMLButtonElement>('#mute')!.click()
+    await importFile(root, encodeSession({ ...defaultSession(), volume: 0 }))
+    root.querySelector<HTMLButtonElement>('#reset-session')!.click()
+    new MeJApp(root)
+    expect(create).not.toHaveBeenCalled()
+    expect(root.querySelector('#status')!.textContent).toBe('Paused')
+  } finally { vi.unstubAllGlobals() }
 })

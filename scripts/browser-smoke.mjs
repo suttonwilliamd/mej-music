@@ -67,22 +67,46 @@ try {
     // Observe native APIs without substituting AudioContext, clocks, nodes or synthesis.
     // Every intercepted method invokes the original browser implementation.
     await context.addInitScript(() => {
-      const probe = { starts: 0, stops: 0, contexts: [] }
+      const probe = { starts: 0, stops: 0, contexts: [], edges: [], sources: [], intervals: 0, clears: 0, holdResume: false, releases: [] }
       Object.defineProperty(window, '__mejProbe', { value: probe })
+      const NativeContext = window.AudioContext
+      window.AudioContext = new Proxy(NativeContext, { construct(target, args) {
+        const context = Reflect.construct(target, args)
+        probe.contexts.push(context)
+        return context
+      } })
+      const connect = AudioNode.prototype.connect
+      AudioNode.prototype.connect = function (...args) {
+        const result = Reflect.apply(connect, this, args)
+        probe.edges.push([this, args[0]])
+        return result
+      }
+      for (const method of ['setInterval', 'clearInterval']) {
+        const native = window[method]
+        window[method] = function (...args) {
+          const result = Reflect.apply(native, this, args)
+          probe[method === 'setInterval' ? 'intervals' : 'clears']++
+          return result
+        }
+      }
       for (const method of ['start', 'stop']) {
         for (const prototype of [OscillatorNode.prototype, AudioBufferSourceNode.prototype]) {
           const native = prototype[method]
           prototype[method] = function (...args) {
             const result = Reflect.apply(native, this, args)
             probe[method === 'start' ? 'starts' : 'stops']++
+            if (method === 'start') probe.sources.push(this)
             return result
           }
         }
       }
       const resume = AudioContext.prototype.resume
-      AudioContext.prototype.resume = function (...args) {
-        if (!probe.contexts.includes(this)) probe.contexts.push(this)
-        return Reflect.apply(resume, this, args)
+      NativeContext.prototype.resume = function (...args) {
+        const result = Reflect.apply(resume, this, args)
+        if (!probe.holdResume) return result
+        const { promise, resolve } = Promise.withResolvers()
+        probe.releases.push(resolve)
+        return result.then(() => promise)
       }
     })
     const page = await context.newPage()
@@ -133,6 +157,30 @@ try {
       }
     }
     await feedbackExposed()
+    const legacy = { version: 1, preset: 'flow', speed: 'mid', steps: Array(16).fill(true) }
+    await page.locator('#import-project').setInputFiles({ name: 'legacy.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(legacy)) })
+    await page.waitForFunction(() => document.querySelector('#project-status')?.textContent.includes('Project imported'))
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('mej.session'))), { ...legacy, version: 2, volume: 100, muted: false })
+    assert.equal(await page.evaluate(() => window.__mejProbe.contexts.length), 0)
+    const volume = page.getByRole('slider', { name: 'Volume', exact: true })
+    const setVolume = async value => {
+      await volume.evaluate((input, level) => {
+        input.value = String(level)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      }, value)
+      assert.equal(await page.locator('#volume-value').innerText(), `${value}%`)
+    }
+    await volume.focus()
+    await volume.press('Home')
+    assert.equal(await volume.inputValue(), '0')
+    await volume.press('ArrowRight')
+    assert.equal(await volume.inputValue(), '1')
+    await volume.press('End')
+    assert.equal(await volume.inputValue(), '100')
+    await setVolume(37)
+    await page.getByRole('button', { name: 'Mute output', exact: true }).press('Space')
+    assert.equal(await page.locator('#volume-state').innerText(), 'Muted · selected 37%')
+    assert.equal(await page.evaluate(() => window.__mejProbe.contexts.length), 0)
     assert.equal(await page.locator('.step-toggle').count(), 16)
     await capture('paused')
     await first.focus()
@@ -164,10 +212,61 @@ try {
     const mutedMarker = await page.locator('.step-toggle.current').getAttribute('data-step')
     await page.waitForFunction(previous => document.querySelector('.step-toggle.current')?.getAttribute('data-step') !== previous, mutedMarker)
     assert.equal(await page.evaluate(() => window.__mejProbe.starts), 0)
+    assert.equal(await page.evaluate(() => {
+      const p = window.__mejProbe
+      return p.edges.find(([, to]) => to === p.contexts[0].destination)[0].gain.value
+    }), 0, 'First Play honors settings chosen before audio creation')
     // Restore is a live edit; real native dispatch must resume on subsequent steps.
     await reset.click()
     assert.equal(await page.getByRole('status').innerText(), 'Playing')
     await page.waitForFunction(() => window.__mejProbe.starts > 0)
+    const masterState = () => page.evaluate(() => {
+      const p = window.__mejProbe
+      const master = p.edges.find(([, to]) => to === p.contexts[0].destination)[0]
+      const pathsControlled = (node, controlled = false, seen = new Set()) => {
+        if (node === p.contexts[0].destination) return controlled
+        if (seen.has(node)) return false
+        const next = p.edges.filter(([from]) => from === node)
+        return next.length > 0 && next.every(([, to]) => pathsControlled(to, controlled || node === master, new Set([...seen, node])))
+      }
+      return { gain: master.gain.value, allControlled: p.sources.every(source => pathsControlled(source)),
+        sourceTypes: [...new Set(p.sources.map(source => source.constructor.name))],
+        starts: p.starts, intervals: p.intervals, clears: p.clears, masters: p.edges.filter(([, to]) => to === p.contexts[0].destination).length }
+    })
+    const beforeOutput = await masterState()
+    assert.equal(beforeOutput.gain, 0)
+    assert.equal(beforeOutput.allControlled, true)
+    assert.equal(beforeOutput.masters, 1)
+    await page.getByRole('button', { name: 'Unmute output', exact: true }).click()
+    await page.waitForFunction(() => {
+      const p = window.__mejProbe
+      return Math.abs(p.edges.find(([, to]) => to === p.contexts[0].destination)[0].gain.value - 0.222) < 0.00001
+    })
+    await setVolume(62)
+    await page.waitForFunction(() => {
+      const p = window.__mejProbe
+      return Math.abs(p.edges.find(([, to]) => to === p.contexts[0].destination)[0].gain.value - 0.372) < 0.00001
+    })
+    const outputMarker = await page.locator('.step-toggle.current').getAttribute('data-step')
+    await page.getByRole('button', { name: 'Mute output', exact: true }).click()
+    await page.waitForFunction(() => {
+      const p = window.__mejProbe
+      return p.edges.find(([, to]) => to === p.contexts[0].destination)[0].gain.value === 0
+    })
+    await page.waitForFunction(previous => document.querySelector('.step-toggle.current')?.getAttribute('data-step') !== previous, outputMarker)
+    await setVolume(37)
+    await page.getByRole('button', { name: 'Unmute output', exact: true }).click()
+    await page.waitForFunction(() => {
+      const p = window.__mejProbe
+      return Math.abs(p.edges.find(([, to]) => to === p.contexts[0].destination)[0].gain.value - 0.222) < 0.00001
+    })
+    const afterOutput = await masterState()
+    assert.equal(afterOutput.intervals, beforeOutput.intervals)
+    assert.equal(afterOutput.clears, beforeOutput.clears)
+    assert.equal(afterOutput.allControlled, true)
+    assert.ok(afterOutput.starts > beforeOutput.starts)
+    assert.deepEqual(afterOutput.sourceTypes.sort(), ['AudioBufferSourceNode', 'OscillatorNode'])
+    await page.getByRole('button', { name: 'Mute output', exact: true }).click()
     await first.click()
     assert.equal(await first.getAttribute('aria-pressed'), 'false')
     await capture('playing')
@@ -186,7 +285,7 @@ try {
     // Exercise actual browser download and file chooser imports, not an app test seam.
     await page.locator('input[name="preset"][value="demon"]').check()
     await page.locator('input[name="speed"][value="slow"]').check()
-    const expected = { version: 1, preset: 'demon', speed: 'slow', steps: [false, ...Array(15).fill(true)] }
+    const expected = { version: 2, preset: 'demon', speed: 'slow', steps: [false, ...Array(15).fill(true)], volume: 37, muted: true }
     const downloadPromise = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Download project JSON', exact: true }).click()
     const download = await downloadPromise
@@ -197,12 +296,16 @@ try {
     await page.getByRole('button', { name: 'Reset session to defaults', exact: true }).click()
     assert.equal(await page.locator('#preset-name').innerText(), 'Flow')
     assert.equal(await page.locator('.step-toggle[aria-pressed="true"]').count(), 16)
+    assert.equal(await volume.inputValue(), '100')
+    assert.equal(await page.locator('#mute').getAttribute('aria-pressed'), 'false')
     await page.locator('#import-project').setInputFiles(projectPath)
     await page.waitForFunction(() => document.querySelector('#project-status')?.textContent.includes('Project imported'))
     assert.equal(await page.locator('#preset-name').innerText(), 'Demon')
     assert.equal(await page.locator('#bpm').innerText(), '105')
     assert.equal(await page.getByRole('status').innerText(), 'Paused')
     assert.equal(await first.getAttribute('aria-pressed'), 'false')
+    assert.equal(await volume.inputValue(), '37')
+    assert.equal(await page.locator('#mute').getAttribute('aria-pressed'), 'true')
     // Malformed import must preserve a live run and the persisted session.
     await page.getByRole('button', { name: 'Play music', exact: true }).click()
     await page.waitForFunction(() => document.querySelector('#status')?.textContent === 'Playing')
@@ -226,14 +329,55 @@ try {
     assert.equal(await page.locator('.step-toggle[aria-pressed="true"]').count(), 15)
     assert.equal(await first.getAttribute('aria-pressed'), 'false')
     assert.equal(await page.evaluate(() => window.__mejProbe.contexts.length), 0)
+    assert.equal(await volume.inputValue(), '37')
+    assert.equal(await page.locator('#volume-state').innerText(), 'Muted · selected 37%')
     await capture('session-restored')
     await noOverflow()
+    // Native audio still starts/resumes normally; defer only the app-facing promise
+    // to exercise settings/import/reset races without fake contexts or nodes.
+    await page.evaluate(() => { window.__mejProbe.holdResume = true })
+    await page.getByRole('button', { name: 'Play music', exact: true }).click()
+    await page.waitForFunction(() => window.__mejProbe.releases.length === 1)
+    await setVolume(24)
+    await page.getByRole('button', { name: 'Unmute output', exact: true }).click()
+    await page.waitForFunction(() => {
+      const p = window.__mejProbe
+      return Math.abs(p.edges.find(([, to]) => to === p.contexts[0].destination)[0].gain.value - 0.144) < 0.00001
+    })
+    await page.evaluate(() => window.__mejProbe.releases.shift()())
+    await page.waitForFunction(() => document.querySelector('#status')?.textContent === 'Playing')
+    await page.getByRole('button', { name: 'Pause music', exact: true }).click()
+    await page.getByRole('button', { name: 'Play music', exact: true }).click()
+    await page.waitForFunction(() => window.__mejProbe.releases.length === 1)
+    await page.locator('#import-project').setInputFiles(projectPath)
+    await page.waitForFunction(() => document.querySelector('#status')?.textContent === 'Paused')
+    await page.evaluate(() => window.__mejProbe.releases.shift()())
+    await page.waitForTimeout(200)
+    assert.equal(await page.getByRole('status').innerText(), 'Paused')
+    assert.equal((await masterState()).gain, 0)
+    await page.getByRole('button', { name: 'Play music', exact: true }).click()
+    await page.waitForFunction(() => window.__mejProbe.releases.length === 1)
+    await page.getByRole('button', { name: 'Reset session to defaults', exact: true }).click()
+    await page.evaluate(() => window.__mejProbe.releases.shift()())
+    await page.waitForTimeout(200)
+    assert.equal(await page.getByRole('status').innerText(), 'Paused')
+    assert.ok(Math.abs((await masterState()).gain - 0.6) < 0.00001)
+    await page.evaluate(old => localStorage.setItem('mej.session', JSON.stringify(old)), legacy)
+    await page.reload({ waitUntil: 'networkidle' })
+    assert.equal(await page.getByRole('status').innerText(), 'Paused')
+    assert.equal(await volume.inputValue(), '100')
+    assert.equal(await page.locator('#mute').getAttribute('aria-pressed'), 'false')
+    assert.equal(await page.evaluate(() => window.__mejProbe.contexts.length), 0)
+    await setVolume(19)
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('mej.session'))), { ...legacy, version: 2, volume: 19, muted: false })
     assert.deepEqual(pageErrors, [])
     assert.deepEqual(blockedRequests, [])
     outcomes.push({ ...dimensions, keyboard: true, resetPreservesTempo: true, mutedNativeDispatch: 0,
       liveEditNativeDispatch: true, pauseNoLaterDispatch: true, markerCleanup: true,
       projectDownloadImport: true, invalidImportPreservesPlayback: true, importedPauseNoLaterDispatch: true,
-      feedbackLiveRegionExposed: true, reloadExactAndPaused: true, reloadAudioContexts: 0, audio })
+      feedbackLiveRegionExposed: true, reloadExactAndPaused: true, reloadAudioContexts: 0,
+      masterGain: { allSourcesControlled: true, maximum: 0.6, selected37: 0.222, muted: 0, phasePreserved: true, pendingResumeLatest: true, importResetCancellation: true },
+      audio })
     await context.close()
     context = null
   }

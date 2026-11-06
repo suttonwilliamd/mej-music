@@ -11,6 +11,7 @@ A small browser instrument built with **native Web Audio**, TypeScript and Vite.
 - An editable 16-step groove mask. Each numbered On/Off button gates all voices for that preset step; the current-step underline advances even through muted steps. On permits the preset's existing ingredients, not a guaranteed hit (a preset can contain rests).
 - Native step buttons support Tab, Space and Enter, with truthful `aria-pressed`, visible On/Off text, dashed muted outlines and amber keyboard focus. The responsive grid uses eight columns on wide desktop and four on narrower screens.
 - Automatic browser-local session save/restore and portable JSON project download/import, sharing one validated versioned format. Loads always start paused.
+- Master volume (0–100%) and mute affect every voice and already-sounding tail without restarting the loop. Native slider arrows/Home/End and the mute button work by keyboard; the selected percentage and muted/silent state remain visible on phone.
 
 ## Run and verify
 
@@ -29,27 +30,35 @@ Tests use Vitest fake timers and jsdom. They cover independently expected step d
 
 ## Editing and reset
 
-The default mask is **all 16 steps on**, preserving each original preset. Toggle any step before or during playback. One canonical session mask gates drums, bass, chords and randomized melody at dispatch; all-off leaves the transport running silently. The mask is shared across characters and survives tempo changes, Restart and Pause/Play. Character, tempo setting and all 16 steps now save locally after every edit and restore exactly on reload, **always paused**.
+The default mask is **all 16 steps on**, preserving each original preset. Toggle any step before or during playback. One canonical session mask gates drums, bass, chords and randomized melody at dispatch; all-off leaves the transport running silently. The mask is shared across characters and survives tempo changes, Restart and Pause/Play. Character, tempo setting, all 16 steps, volume and mute save locally after edits and restore exactly on reload, **always paused**.
 
 **Restore default pattern** turns all 16 steps on, including when paused or audio startup is pending. It does not change the selected character, tempo, playback state or loop position. Restart instead resets the loop position and cancels existing tails/repeats, without replacing your edits.
 
 A live edit affects the next **not-yet-dispatched** step, without restarting the loop. Each step snapshots the mask once: a note already sounding and repeats already scheduled within that step are not undone by editing or restoring. Pause still cancels both active tails and pending repeats. This is a groove gate, not an instrument-note composer or a piano roll.
 
+## Master output
+
+**Volume** selects an integer percentage from 0 to 100. **Mute output** silences the master without changing that selection; **Unmute output** restores the latest selected level, including changes made while muted. Zero volume is silent even when unmuted. Mute does not pause: the marker and scheduler continue, retaining your edits and loop position. These controls also affect notes already sounding, unlike groove-step edits.
+
+100% maps to the existing master gain of **0.6**, not a louder new maximum; 50% maps to 0.3. This is linear gain, not a perceived-loudness scale. Live changes use a short 15 ms ramp, reaching exact zero for mute. All voices share the same master node. No limiter, mastering or listening-quality guarantee is implied; keep device volume low.
+
+Changing settings, restoring or importing before first Play never creates or resumes audio. First Play honors the latest settings, and changes while audio startup is pending remain effective. Settings are not per-instrument mixing.
+
 ## Sessions, project files and privacy
 
-**Download project JSON** saves `mej-project.json`. **Import project JSON** opens a local file picker; choosing a valid file replaces your character, tempo and mask, cancels pending audio startup, notes and repetitions, and pauses. Press Play explicitly to start the imported loop from the beginning. Invalid, unreadable, oversized or unsupported files show an accessible error without changing your session, saved data or playback. Nothing uploads.
+**Download project JSON** saves `mej-project.json`. **Import project JSON** opens a local file picker; choosing a valid file replaces your character, tempo, mask, volume and mute, cancels pending audio startup, notes and repetitions, and pauses. Press Play explicitly to start the imported loop from the beginning. Invalid, unreadable, oversized or unsupported files show an accessible error without changing your session, saved data or playback. Nothing uploads.
 
-**Reset session to defaults** stops playback and saves Flow / Mid / all 16 steps on as the new local session. This differs from **Restore default pattern**, which only enables the mask and preserves live play position, character and tempo.
+**Reset session to defaults** stops playback and saves Flow / Mid / all 16 steps on / volume 100% / unmuted as the new local session. This differs from **Restore default pattern**, which only enables the mask and preserves live play position, character, tempo, volume and mute.
 
 Storage is one `localStorage` entry, `mej.session`, scoped to this browser profile and site origin (including port). There is no cloud, account, analytics or cross-tab synchronization. Browser clearing/private-mode policy can erase it; another tab can overwrite the stored entry. Download a file for a durable or portable copy. If storage access is blocked or quota is full, visible feedback says the session is not saved; playing, importing and downloading remain available. A later successful edit retries saving. Invalid saved data falls back to defaults without starting audio or overwriting that data until you edit, successfully import or explicitly reset.
 
-The compact v1 format contains **only** these four fields:
+The compact v2 format contains **only** these six fields:
 
 ```json
-{"version":1,"preset":"flow","speed":"mid","steps":[true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true]}
+{"version":2,"preset":"flow","speed":"mid","steps":[true,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true],"volume":100,"muted":false}
 ```
 
-Preset is `starry`, `flow`, `glitch` or `demon`; speed is `slow`, `mid` or `fast`, not an arbitrary numeric BPM. Exactly 16 booleans and no extra fields are accepted. JSON files are limited to 4 KiB; unknown versions are rejected rather than guessed or migrated. This is a settings project, not audio export: it contains no transport position, play state, AudioContext, sound data, random seed, note edits or composition history. Melody randomness is not reproduced on load.
+Preset is `starry`, `flow`, `glitch` or `demon`; speed is `slow`, `mid` or `fast`, not an arbitrary numeric BPM. Exactly 16 booleans, an integer `volume` from 0 to 100 and a boolean `muted` are required; extra fields are rejected. JSON files are limited to 4 KiB. Valid **v1** projects/local sessions (the same preset/speed/steps fields with `version:1` and no volume/mute fields) migrate to v2 in memory, preserving every edit and using **100% / unmuted**, the original output level. The next edit, import or reset writes v2 to the same `mej.session` key; downloads always use v2. There is no separate settings store. Other versions are rejected. This is a settings project, not audio export: it contains no transport position, play state, AudioContext, sound data, random seed, note edits or composition history. Melody randomness is not reproduced on load.
 
 
 ## Playback semantics and limitations

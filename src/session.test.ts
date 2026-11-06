@@ -5,9 +5,9 @@ it('round-trips every preset and tempo with exact mixed, all-on and all-off mask
   for (const preset of ['starry', 'flow', 'glitch', 'demon'] as const) {
     for (const speed of ['slow', 'mid', 'fast'] as const) {
       for (const steps of [Array(16).fill(true), Array(16).fill(false), Array.from({ length: 16 }, (_, i) => i % 3 === 0)]) {
-        const session = { version: 1 as const, preset, speed, steps }
+        const session = { version: 2 as const, preset, speed, steps, volume: 37, muted: true }
         expect(decodeSession(encodeSession(session))).toEqual(session)
-        expect(Object.keys(JSON.parse(encodeSession(session)))).toEqual(['version', 'preset', 'speed', 'steps'])
+        expect(Object.keys(JSON.parse(encodeSession(session)))).toEqual(['version', 'preset', 'speed', 'steps', 'volume', 'muted'])
       }
     }
   }
@@ -16,7 +16,7 @@ it('round-trips every preset and tempo with exact mixed, all-on and all-off mask
 it.each([
   '', '{', 'null', '[]', 'true', '42', '"session"',
   JSON.stringify({ ...defaultSession(), version: 0 }),
-  JSON.stringify({ ...defaultSession(), version: 2 }),
+  JSON.stringify({ ...defaultSession(), version: 3 }),
   JSON.stringify({ ...defaultSession(), version: '1' }),
   JSON.stringify({ preset: 'flow', speed: 'mid', steps: Array(16).fill(true) }),
   JSON.stringify({ ...defaultSession(), preset: 'constructor' }),
@@ -31,6 +31,11 @@ it.each([
   JSON.stringify({ ...defaultSession(), steps: '1111111111111111' }),
   JSON.stringify({ ...defaultSession(), playing: true }),
   JSON.stringify({ version: 1, preset: 'flow', speed: 'mid' }),
+  ...[-1, 101, 0.5, '50', null, true].map(volume => JSON.stringify({ ...defaultSession(), volume })),
+  ...[0, 'false', null].map(muted => JSON.stringify({ ...defaultSession(), muted })),
+  JSON.stringify({ version: 2, preset: 'flow', speed: 'mid', steps: Array(16).fill(true), volume: 50 }),
+  JSON.stringify({ version: 2, preset: 'flow', speed: 'mid', steps: Array(16).fill(true), muted: false }),
+  JSON.stringify({ version: 1, preset: 'flow', speed: 'mid', steps: Array(16).fill(true), volume: 50 }),
 ])('rejects malformed, unsupported or lossy project input %#', text => {
   expect(() => decodeSession(text)).toThrow()
 })
@@ -49,4 +54,24 @@ it('returns independent defaults and decoded step arrays; refuses invalid export
   decoded.steps[0] = true
   expect(first.steps[0]).toBe(false)
   expect(() => encodeSession({ ...first, steps: [] })).toThrow('16 boolean')
+})
+
+it('migrates every valid v1 preset/speed/mask without losing progress, with original output defaults', () => {
+  for (const preset of ['starry', 'flow', 'glitch', 'demon']) {
+    for (const speed of ['slow', 'mid', 'fast']) {
+      for (const steps of [Array(16).fill(true), Array(16).fill(false), Array.from({ length: 16 }, (_, i) => i % 3 === 0)]) {
+        const old = { version: 1, preset, speed, steps }
+        expect(decodeSession(JSON.stringify(old))).toEqual({ ...old, version: 2, volume: 100, muted: false })
+      }
+    }
+  }
+})
+
+it('preserves both mute states at zero, intermediate and maximum volume in v2', () => {
+  for (const volume of [0, 1, 37, 99, 100]) {
+    for (const muted of [true, false]) {
+      const session = { ...defaultSession(), volume, muted }
+      expect(decodeSession(encodeSession(session))).toEqual(session)
+    }
+  }
 })

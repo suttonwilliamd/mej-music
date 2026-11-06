@@ -112,11 +112,53 @@ the empty polite region initially and again after a rejected import. The final b
 and complete browser smoke passed after the fix. This checks browser exposure, not
 actual announcements by a particular screen reader.
 
-See README for the `mej.session` key, v1 JSON schema, 4 KiB file cap, storage privacy
+See README for the `mej.session` key, current v2 schema and v1 migration, 4 KiB file cap, storage privacy
 and reset semantics. No state is uploaded, no dependencies were added, and projects
 do not serialize audio, transport state or melody randomness. For future changes,
 keep validation before state mutation, keep imports paused, preserve invalid-import
 playback, and test storage failure independently of audio availability.
+
+### Master output acceptance (November 6, 2026)
+
+Second-milestone baseline is published session-files commit
+`086ffd02a00c8248ad2b8d3dda39d4fec2141718` on
+`overnight/2026-11-06-session-files`. Final local checks passed **72 tests in four
+files**, TypeScript/Vite production build and the complete built-dist browser smoke.
+This remains Windows x64 / Node 24.20.0 / Chromium 156.0.8078.4 evidence, not hosted CI.
+
+The codec has one canonical v2 representation for files and browser storage. Tests
+cover preserved v1 progress across every preset/speed and mixed/all-on/all-off masks;
+strict v2 volume integer boundaries, mute types and missing/extra fields; exact v2
+roundtrips; live output edits preserving scheduler phase and groove edits; pending
+resume using latest output; invalid imports preserving startup/playback; successful
+imports/reset fencing old startup; and no AudioContext construction for settings,
+import, reset or reload before Play. ES2020 test fixtures retain the existing
+controlled-Promise pattern rather than requiring newer Promise library types.
+
+The browser probe calls original native AudioContext/node/connection/interval APIs,
+records the real connection graph, and proves both oscillator and noise-buffer
+sources route through one master on every path to the destination. It observes
+0 gain while muted, 0.222 at 37%, 0.372 at 62%, restored selected gain after unmute
+and the unchanged 0.6 maximum after reset. Dispatch and markers continue during
+mute; live output changes do not replace or clear the scheduler interval. Existing
+tails share that same controlled master. Short 15 ms gain ramps are implementation
+smoothing, not an audible-quality claim.
+
+At both 1280 and 320 px the smoke exercises native range Home/ArrowRight/End and
+mute Space; actual v1 file import and local reload migration; v2 download/reset/
+file import/reload with exact volume/mute; empty feedback-region AX exposure; and
+no horizontal overflow. Native resume is invoked normally; a controlled promise
+gate delays only its app-facing completion to prove latest settings and import/
+reset cancellation while real audio nodes and scheduling APIs remain native.
+Chromium is launched with `--mute-audio`; no listening was performed.
+
+`artifacts/browser-smoke/results.json` qualifies this run and lists the eight PNGs,
+dist/image hashes and per-viewport master-gain outcomes. Full desktop/phone captures
+were inspected. A separate owned browser-helper tab exercised keyboard range/mute
+and inspected the master-output accessibility subtree at both widths; its screenshots
+show explicit “Muted · selected 1%” feedback, slider and focusable Unmute button.
+The tab and dedicated loopback preview were closed afterward. No recording, mixer,
+limiter, audio export, dependencies, services or user-data changes were introduced.
 
 
 ## Visual direction

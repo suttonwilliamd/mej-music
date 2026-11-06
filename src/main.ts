@@ -18,12 +18,24 @@ class AudioEngine {
   private context: AudioContext | null = null
   private output: GainNode | null = null
   private sources = new Set<AudioScheduledSourceNode>()
+  private level = 0.6
+
+  setVolume(volume: number, muted: boolean) {
+    this.level = muted ? 0 : volume / 100 * 0.6
+    if (!this.context || !this.output) return // Settings never unlock/create audio.
+    const now = this.context.currentTime
+    const gain = this.output.gain
+    const current = gain.value
+    gain.cancelScheduledValues(now)
+    gain.setValueAtTime(current, now)
+    gain.linearRampToValueAtTime(this.level, now + 0.015)
+  }
 
   async resume() {
     if (!this.context) {
       this.context = new AudioContext()
       this.output = this.context.createGain()
-      this.output.gain.value = 0.6
+      this.output.gain.value = this.level
       this.output.connect(this.context.destination)
     }
     await this.context.resume()
@@ -93,6 +105,7 @@ class AudioEngine {
 
 export interface Instrument {
   resume(): Promise<void>
+  setVolume(volume: number, muted: boolean): void
   stop(): void
   drum(sound: string): void
   note(note: string, duration: number, gain: number, type?: OscillatorType): void
@@ -108,6 +121,8 @@ export class MeJApp {
   // One session-wide groove mask. Preset/tempo/restart/pause do not replace edits.
   private mask: boolean[]
   private importRequest = 0
+  private volume: number
+  private muted: boolean
 
   constructor(private root: HTMLElement, private audio: Instrument = new AudioEngine()) {
     this.transport = new Transport(window, sound => this.audio.drum(sound))
@@ -129,6 +144,8 @@ export class MeJApp {
     this.preset = session.preset
     this.speed = session.speed
     this.mask = session.steps
+    this.volume = session.volume
+    this.muted = session.muted
     root.innerHTML = `
       <header><a class="wordmark" href="./" aria-label="MeJ home">MeJ<span> / </span></a><span class="edition">A small generative instrument · 0.1</span></header>
       <main>
@@ -143,11 +160,19 @@ export class MeJApp {
             <p class="pattern-hint">Default = all steps on. Restore keeps your character, tempo and play position.</p>
           </fieldset>
           <div class="transport"><button id="play" class="primary" aria-label="Play music" aria-pressed="false"><span aria-hidden="true">▶</span> <span id="play-label">Play</span></button><button id="restart" aria-label="Restart loop from beginning">↺ <span>Restart</span></button><p id="status" role="status" aria-live="polite">Paused</p></div>
+          <fieldset class="master-volume" aria-describedby="volume-help">
+            <legend>Master output</legend>
+            <label for="volume">Volume <output id="volume-value" for="volume" aria-hidden="true">100%</output></label>
+            <input id="volume" type="range" min="0" max="100" step="1" value="100">
+            <button id="mute" type="button" aria-pressed="false" aria-label="Mute output">Mute output</button>
+            <p id="volume-state">Output on · 100%</p>
+            <p id="volume-help">Live level, including sounding notes. 100% keeps the original output ceiling. Start with device volume low.</p>
+          </fieldset>
           <fieldset class="speed"><legend>Tempo <span>· relative to preset</span></legend>${(['slow','mid','fast'] as const).map(speed => `<label><input type="radio" name="speed" value="${speed}" ${speed === 'mid' ? 'checked' : ''}><span>${speed[0].toUpperCase() + speed.slice(1)}</span></label>`).join('')}</fieldset>
           <fieldset class="presets"><legend>Choose your character</legend>${Object.entries(PRESETS).map(([key,preset], index) => `<label><input type="radio" name="preset" value="${key}" ${key === 'flow' ? 'checked' : ''}><span class="card"><span class="card-number">0${index+1}</span><strong>${preset.name}</strong><span>${preset.description}</span></span></label>`).join('')}</fieldset>
           <section class="session-files" aria-labelledby="session-heading">
             <h3 id="session-heading">Keep your session</h3>
-            <p id="session-help">Character, tempo and steps only. Import and reset pause playback. Reload never starts audio.</p>
+            <p id="session-help">Character, tempo, steps, volume and mute. Import and reset pause playback. Reload never starts audio.</p>
             <div class="session-actions"><button id="download-project" type="button">Download project JSON</button><button id="reset-session" type="button">Reset session to defaults</button></div>
             <label for="import-project">Import project JSON <span>· replaces this session after validation</span></label>
             <input id="import-project" type="file" accept=".json,application/json" aria-describedby="session-help">
@@ -171,6 +196,16 @@ export class MeJApp {
     })
     root.querySelector('#play')!.addEventListener('click', () => this.playing ? this.pause() : void this.play())
     root.querySelector('#restart')!.addEventListener('click', () => { if (this.playing) this.startLoop() })
+    root.querySelector<HTMLInputElement>('#volume')!.addEventListener('input', event => {
+      this.volume = Number((event.target as HTMLInputElement).value)
+      this.updateOutput()
+      this.saveSession()
+    })
+    root.querySelector('#mute')!.addEventListener('click', () => {
+      this.muted = !this.muted
+      this.updateOutput()
+      this.saveSession()
+    })
     root.querySelectorAll<HTMLInputElement>('input[name="speed"]').forEach(input => input.addEventListener('change', () => {
       this.speed = input.value as Speed
       this.update()
@@ -194,14 +229,15 @@ export class MeJApp {
     root.querySelector('#reset-session')!.addEventListener('click', () => {
       this.importRequest++
       this.replaceSession(defaultSession())
-      this.projectFeedback('Session reset: Flow, Mid, all 16 steps on. Paused.')
+      this.projectFeedback('Session reset: Flow, Mid, all 16 steps on, volume 100%, output unmuted. Paused.')
     })
+    this.updateOutput()
     this.updatePattern()
     this.update()
   }
 
   private snapshot(): Session {
-    return { version: 1, preset: this.preset, speed: this.speed, steps: this.mask }
+    return { version: 2, preset: this.preset, speed: this.speed, steps: this.mask, volume: this.volume, muted: this.muted }
   }
 
   private saveSession() {
@@ -223,6 +259,9 @@ export class MeJApp {
     this.preset = session.preset
     this.speed = session.speed
     this.mask = session.steps
+    this.volume = session.volume
+    this.muted = session.muted
+    this.updateOutput()
     this.updatePattern()
     this.update()
     this.saveSession()
@@ -259,6 +298,18 @@ export class MeJApp {
     } finally {
       if (url) window.setTimeout(() => URL.revokeObjectURL(url!), 0)
     }
+  }
+
+  private updateOutput() {
+    this.audio.setVolume(this.volume, this.muted)
+    this.root.querySelector<HTMLInputElement>('#volume')!.value = String(this.volume)
+    this.root.querySelector('#volume-value')!.textContent = `${this.volume}%`
+    this.root.querySelector('#volume')!.setAttribute('aria-valuetext', `${this.volume}%${this.muted ? ', output muted' : ''}`)
+    const mute = this.root.querySelector<HTMLButtonElement>('#mute')!
+    mute.setAttribute('aria-pressed', String(this.muted))
+    mute.textContent = this.muted ? 'Unmute output' : 'Mute output'
+    mute.setAttribute('aria-label', mute.textContent)
+    this.root.querySelector('#volume-state')!.textContent = this.muted ? `Muted · selected ${this.volume}%` : this.volume === 0 ? 'Silent · volume 0%' : `Output on · ${this.volume}%`
   }
 
   private updatePattern() {

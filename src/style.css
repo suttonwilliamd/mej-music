@@ -11,3 +11,13 @@
 .session-files input[type=file]:focus-visible{outline:3px solid #ffcb83;outline-offset:5px}
 .session-files #project-error{color:#ffcb83}
 .session-files #project-error:empty,.session-files #project-status:empty{margin:0}
+.master-volume{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;border-top:1px solid var(--line);padding-top:20px}
+.master-volume legend{margin-bottom:0}
+.master-volume label{grid-column:1/-1;font-size:14px;display:flex;justify-content:space-between;align-items:center}
+.master-volume output{color:var(--accent);font-variant-numeric:tabular-nums}
+.master-volume input[type=range]{width:100%;min-width:0;min-height:48px;margin:0;accent-color:var(--accent)}
+.master-volume input:focus-visible{outline:3px solid #ffcb83;outline-offset:3px}
+.master-volume button{font-size:12px;padding:10px}
+.master-volume button[aria-pressed=true]{border-color:var(--accent);border-style:dashed;color:var(--accent)}
+.master-volume p{grid-column:1/-1;margin:0;font-size:12px;color:var(--muted);line-height:1.6}
+.master-volume #volume-state{color:#f4f1e9;font-size:14px}
