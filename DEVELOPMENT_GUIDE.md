@@ -22,7 +22,7 @@ production exploits. Registry audit results are time-specific, not a guarantee
 against unknown vulnerabilities. Never expose development/test servers to untrusted
 networks or use untrusted inputs on the assumption that production audit covers them.
 Recheck with `npm audit --json` and `npm audit --omit=dev --json` after fresh
-`npm ci`; all 18 existing tests and the build must still pass.
+`npm ci`; all 25 current tests and the build must still pass.
 
 ### Real built-dist browser smoke
 
@@ -86,6 +86,18 @@ Evidence from headless rendering is not a browser listening check, a physical to
 
 ## Browser audio / Windows acceptance
 
-At low device volume, exercise each preset and each speed. Verify perceived tempo changes, only one loop plays after repeated clicks, pause silences tails and delayed drum bursts, restart returns to step zero, and switching presets cancels old bursts. Check start-pause during audio permission/startup and unsupported-audio failure messaging. Recheck after tab background/foreground (timer drift is a known limitation). Confirm no console exceptions. Repeat browser behavior on native Windows once the authorized runner is available; no Windows testing is claimed here.
+At low device volume, exercise each preset and each speed. Verify perceived tempo changes, only one loop plays after repeated clicks, pause silences tails and delayed drum bursts, restart returns to step zero, and switching presets cancels old bursts. Check start-pause during audio permission/startup and unsupported-audio failure messaging. Recheck after tab background/foreground (timer drift is a known limitation). Confirm no console exceptions. The portability branch below includes actual muted headless Windows browser checks; it does not establish listening quality or physical-device acceptance.
 
 Source tracking intentionally stops active Web Audio nodes on pause instead of suspending a context full of future notes. No desktop app, recording, timer or mood feature should be claimed without a separately tested implementation.
+
+## Portable loop settings — 2026-11-08 branch
+
+`src/loopFile.ts` defines the bounded version-1 JSON contract described in README. Loading changes settings only after complete validation plus an explicit user action. Preview/cancel and invalid files leave transport/voices running; apply calls the existing pause path first, fencing audio startup and scheduled callbacks, then replaces settings and updates radio/mask state. Pending file reads have a separate generation token so old reads cannot revive cancelled/applied previews.
+
+`npm test`: **25 passed**; `npm run build`: passed. Permanent regressions cover file boundaries, imported audible-versus-muted step outcomes, continued old playback after invalid/cancelled previews, async resume cancellation, and stale file-read fencing. Test-only deferred promises use the Node 22 `Promise.withResolvers` API; browser source remains ES2020.
+
+Actual built-dist Windows Chrome file smoke passed using an isolated profile and ephemeral loopback preview. The downloaded file was read from disk; load after reload recovered Starry/Fast and steps 1/16 off. Preview/cancel/invalid input preserved playing audio. Load stopped native dispatch; Play alone resumed, with no first-step sources and later enabled native source starts. Loading while paused after reload created no AudioContext. A 16 KiB overflow file was rejected; desktop/320px screenshots were inspected without overflow or page errors.
+
+Existing `npm run test:browser` also passed (two viewports, six PNGs) using the installed Chrome via process-local `MEJ_BROWSER_EXECUTABLE` and an isolated `MEJ_BROWSER_OUTPUT`. No browser installation, global environment change, audible recording or new service was needed. Its pre-commit `head` identifies the base checkout; `distManifest` hashes identify the actual changed production assets tested, not an unmodified-base claim.
+
+Portfolio-owner artifacts outside this checkout: `evidence/mej-loop-browser-results.json`, `evidence/mej-loop.json`, desktop/mobile screenshots and `evidence/mej-existing-browser/results.json`. Non-Chromium engines, listening, physical touch devices, screen readers and timed/background accuracy remain unverified.

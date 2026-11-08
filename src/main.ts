@@ -1,5 +1,6 @@
 import './style.css'
 import { Transport, tempo, type Speed } from './transport'
+import { MAX_LOOP_BYTES, parseLoop, serializeLoop, type LoopSettings } from './loopFile'
 
 const PRESETS = {
   starry: { name: 'Starry', bpm: 80, description: 'A minor · spacious & wandering', bass: ['a1', 'f1', 'c2', 'g1'], chords: [['a3','c4','e4'],['f3','a3','c4'],['c4','e4','g4'],['g3','b3','d4']], melody: ['a4','c5','b4','c5'], chance: 0.1,
@@ -11,7 +12,7 @@ const PRESETS = {
   demon: { name: 'Demon', bpm: 140, description: 'E minor · dense & insistent', bass: ['e1','c2','g1','d2'], chords: [['e3','g3','b3'],['c4','e4','g4'],['g3','b3','d4'],['d3','f3','a3']], melody: ['e3','g3','b3','e4'], chance: 0.15,
     pattern: ['bd bd bd bd','sn ~ sn ~','hh*8 ~ ~ ~','cp*4 bd*4','bd ~ ~ ~','sn ~ sn ~','hh*4 ~ ~ ~','~ ~ ~ cp','bd bd bd bd','sn ~ sn ~','hh*8 ~ ~ ~','cp*4 bd*4','bd ~ ~ ~','sn ~ sn ~','hh*4 ~ ~ ~','~ ~ ~ ~'] }
 }
-type Preset = keyof typeof PRESETS
+type Preset = LoopSettings['preset']
 
 /** Browser synthesis only: no samples, Strudel runtime, or desktop wrapper. */
 class AudioEngine {
@@ -107,6 +108,8 @@ export class MeJApp {
   private transport: Transport
   // One session-wide groove mask. Preset/tempo/restart/pause do not replace edits.
   private mask = Array<boolean>(16).fill(true)
+  private pendingLoop: LoopSettings | null = null
+  private fileRequest = 0
 
   constructor(private root: HTMLElement, private audio: Instrument = new AudioEngine()) {
     this.transport = new Transport(window, sound => this.audio.drum(sound))
@@ -126,6 +129,15 @@ export class MeJApp {
           <div class="transport"><button id="play" class="primary" aria-label="Play music" aria-pressed="false"><span aria-hidden="true">▶</span> <span id="play-label">Play</span></button><button id="restart" aria-label="Restart loop from beginning">↺ <span>Restart</span></button><p id="status" role="status" aria-live="polite">Paused</p></div>
           <fieldset class="speed"><legend>Tempo <span>· relative to preset</span></legend>${(['slow','mid','fast'] as const).map(speed => `<label><input type="radio" name="speed" value="${speed}" ${speed === 'mid' ? 'checked' : ''}><span>${speed[0].toUpperCase() + speed.slice(1)}</span></label>`).join('')}</fieldset>
           <fieldset class="presets"><legend>Choose your character</legend>${Object.entries(PRESETS).map(([key,preset], index) => `<label><input type="radio" name="preset" value="${key}" ${key === 'flow' ? 'checked' : ''}><span class="card"><span class="card-number">0${index+1}</span><strong>${preset.name}</strong><span>${preset.description}</span></span></label>`).join('')}</fieldset>
+          <fieldset class="loop-files" aria-describedby="loop-file-help">
+            <legend>Keep your loop</legend>
+            <p id="loop-file-help">Save the character, tempo and 16 steps as JSON, not recorded audio. Loading replaces these settings and pauses playback; it never starts audio. Save your current loop first if needed.</p>
+            <button id="save-loop" type="button">Save loop JSON</button>
+            <label for="loop-file">Choose loop JSON to preview</label>
+            <input id="loop-file" type="file" accept=".json,application/json" aria-describedby="loop-file-status">
+            <div class="loop-file-actions"><button id="load-loop" type="button" disabled>Load loop and pause</button><button id="cancel-load" type="button" disabled>Cancel load</button></div>
+            <p id="loop-file-status" aria-live="polite">No loop file selected. Files stay on your device.</p>
+          </fieldset>
         </section>
         <aside><strong>Just the essentials.</strong> Continuous playback with synthesized drums, bass, chords and occasional melody. Mood shaping, timed tracks, recording and “New Track” generation aren’t available in this version.</aside>
       </main><footer>Made in your browser. No samples, no account.<span>Start with your volume low.</span></footer>`
@@ -150,8 +162,61 @@ export class MeJApp {
       this.update()
       if (this.playing) this.startLoop()
     }))
+    root.querySelector('#save-loop')!.addEventListener('click', () => {
+      const source = serializeLoop({ preset: this.preset, speed: this.speed, mask: this.mask })
+      const url = URL.createObjectURL(new Blob([source], { type: 'application/json' }))
+      const link = document.createElement('a')
+      link.href = url; link.download = 'mej-loop.json'
+      root.append(link); link.click(); link.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+      root.querySelector('#loop-file-status')!.textContent = 'Loop JSON download requested. This saves settings, not audio or the current play position.'
+    })
+    const loopFile = root.querySelector<HTMLInputElement>('#loop-file')!
+    loopFile.addEventListener('change', () => void this.previewLoop(loopFile))
+    root.querySelector('#cancel-load')!.addEventListener('click', () => {
+      this.clearLoopPreview()
+      root.querySelector('#loop-file-status')!.textContent = 'Load cancelled. Your loop and playback are unchanged.'
+    })
+    root.querySelector('#load-loop')!.addEventListener('click', () => {
+      const loop = this.pendingLoop
+      if (!loop) return
+      this.pause() // Also fences an unfinished AudioContext.resume request.
+      this.preset = loop.preset; this.speed = loop.speed; this.mask = loop.mask
+      this.clearLoopPreview()
+      this.updatePattern(); this.update()
+      root.querySelector('#loop-file-status')!.textContent = 'Loop loaded and paused. Press Play when you are ready.'
+    })
     this.updatePattern()
     this.update()
+  }
+
+  private clearLoopPreview() {
+    this.fileRequest++
+    this.pendingLoop = null
+    this.root.querySelector<HTMLInputElement>('#loop-file')!.value = ''
+    this.root.querySelector<HTMLButtonElement>('#load-loop')!.disabled = true
+    this.root.querySelector<HTMLButtonElement>('#cancel-load')!.disabled = true
+  }
+
+  private async previewLoop(input: HTMLInputElement) {
+    const request = ++this.fileRequest, file = input.files?.[0]
+    this.pendingLoop = null
+    this.root.querySelector<HTMLButtonElement>('#load-loop')!.disabled = true
+    this.root.querySelector<HTMLButtonElement>('#cancel-load')!.disabled = !file
+    const status = this.root.querySelector('#loop-file-status')!
+    if (!file) { status.textContent = 'No file selected. Your loop and playback are unchanged.'; return }
+    status.textContent = 'Checking loop file. Current loop and playback are unchanged.'
+    try {
+      if (file.size > MAX_LOOP_BYTES) throw new Error('Loop files must be no larger than 16 KiB.')
+      const loop = parseLoop(await file.text())
+      if (request !== this.fileRequest) return
+      this.pendingLoop = loop
+      this.root.querySelector<HTMLButtonElement>('#load-loop')!.disabled = false
+      status.textContent = `Ready: ${PRESETS[loop.preset].name}, ${tempo(PRESETS[loop.preset].bpm, loop.speed)} BPM, ${loop.mask.filter(Boolean).length} of 16 steps on. Load replaces current settings and pauses audio. Nothing has changed yet.`
+    } catch (error) {
+      if (request !== this.fileRequest) return
+      status.textContent = `${error instanceof Error ? error.message : 'Loop file could not be read.'} Current loop and playback kept.`
+    }
   }
 
   private updatePattern() {
@@ -163,6 +228,8 @@ export class MeJApp {
   }
 
   private update() {
+    this.root.querySelectorAll<HTMLInputElement>('input[name="preset"]').forEach(input => { input.checked = input.value === this.preset })
+    this.root.querySelectorAll<HTMLInputElement>('input[name="speed"]').forEach(input => { input.checked = input.value === this.speed })
     this.root.querySelector('#bpm')!.textContent = String(tempo(PRESETS[this.preset].bpm, this.speed))
     this.root.querySelector('#preset-name')!.textContent = PRESETS[this.preset].name
     this.root.querySelector('#play')!.setAttribute('aria-pressed', String(this.playing))

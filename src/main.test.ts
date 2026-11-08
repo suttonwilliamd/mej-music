@@ -1,3 +1,4 @@
+/// <reference lib="es2024.promise" />
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
 import { MeJApp, type Instrument } from './main'
@@ -141,4 +142,84 @@ it('reports audio startup failure without claiming playback', async () => {
   await Promise.resolve()
   expect(root.querySelector('#status')!.textContent).toContain('Audio unavailable')
   expect(root.querySelector('#play')!.getAttribute('aria-pressed')).toBe('false')
+})
+
+const importedLoop = { format: 'mej-loop', version: 1, preset: 'starry', speed: 'fast', mask: [false,true,true,true,true,true,true,true,true,true,true,true,true,true,true,true] }
+async function chooseLoop(root: HTMLElement, value: unknown, read?: () => Promise<string>) {
+  const source = JSON.stringify(value)
+  const file = new File([source], 'loop.json', { type: 'application/json' })
+  // jsdom does not implement File.text; only the file-reader boundary is supplied.
+  Object.defineProperty(file, 'text', { value: read ?? (() => Promise.resolve(source)) })
+  const input = root.querySelector<HTMLInputElement>('#loop-file')!
+  Object.defineProperty(input, 'files', { configurable: true, value: [file] })
+  input.dispatchEvent(new Event('change'))
+  await Promise.resolve()
+}
+
+it('previews without mutation, then loads paused and dispatches the imported musical steps on explicit Play', async () => {
+  vi.spyOn(Math, 'random').mockReturnValue(0.99)
+  const { root, audio, click } = setup()
+  click('#play'); await Promise.resolve()
+  await chooseLoop(root, importedLoop)
+  expect(root.querySelector('#status')!.textContent).toBe('Playing')
+  expect(root.querySelector('#bpm')!.textContent).toBe('90')
+  expect(pressedMask(root)[0]).toBe(true)
+  click('#load-loop')
+  expect(root.querySelector('#status')!.textContent).toBe('Paused')
+  expect(vi.getTimerCount()).toBe(0)
+  expect(root.querySelector('#bpm')!.textContent).toBe('100')
+  expect(root.querySelector<HTMLInputElement>('input[value="starry"]')!.checked).toBe(true)
+  expect(root.querySelector<HTMLInputElement>('input[value="fast"]')!.checked).toBe(true)
+  expect(pressedMask(root)).toEqual(importedLoop.mask)
+  vi.mocked(audio.drum).mockClear(); vi.mocked(audio.note).mockClear()
+  click('#play'); await Promise.resolve()
+  vi.advanceTimersByTime(150)
+  expect(audio.drum).not.toHaveBeenCalled()
+  expect(audio.note).not.toHaveBeenCalled()
+  vi.advanceTimersByTime(150)
+  expect(vi.mocked(audio.drum).mock.calls).toEqual([['sn']])
+})
+
+it('invalid files and cancelled previews leave the existing loop and playback running', async () => {
+  vi.spyOn(Math, 'random').mockReturnValue(0.99)
+  const { root, audio, click } = setup()
+  click('#play'); await Promise.resolve()
+  await chooseLoop(root, { ...importedLoop, version: 2 })
+  expect(root.querySelector<HTMLButtonElement>('#load-loop')!.disabled).toBe(true)
+  expect(root.querySelector('#status')!.textContent).toBe('Playing')
+  await chooseLoop(root, importedLoop)
+  click('#cancel-load')
+  expect(root.querySelector('#bpm')!.textContent).toBe('90')
+  expect(pressedMask(root)).toEqual(Array(16).fill(true))
+  vi.advanceTimersByTime(167)
+  expect(vi.mocked(audio.drum).mock.calls).toEqual([['bd'], ['bd']])
+})
+
+it('loading during audio startup fences the old completion and never starts the imported loop', async () => {
+  const { promise, resolve: resume } = Promise.withResolvers<void>()
+  const { root, audio, click } = setup(() => promise)
+  click('#play')
+  await chooseLoop(root, importedLoop)
+  click('#load-loop')
+  resume(); await Promise.resolve()
+  vi.advanceTimersByTime(2000)
+  expect(root.querySelector('#status')!.textContent).toBe('Paused')
+  expect(root.querySelector('#bpm')!.textContent).toBe('100')
+  expect(audio.drum).not.toHaveBeenCalled()
+  expect(audio.note).not.toHaveBeenCalled()
+  expect(vi.getTimerCount()).toBe(0)
+})
+
+it('a stale file read cannot replace a newer loaded loop or resurrect its preview', async () => {
+  const { promise, resolve: finish } = Promise.withResolvers<string>()
+  const { root, click } = setup()
+  await chooseLoop(root, importedLoop, () => promise)
+  await chooseLoop(root, { ...importedLoop, preset: 'demon', speed: 'slow', mask: Array(16).fill(false) })
+  click('#load-loop')
+  finish(JSON.stringify(importedLoop)); await Promise.resolve()
+  expect(root.querySelector('#bpm')!.textContent).toBe('105')
+  expect(root.querySelector('#preset-name')!.textContent).toBe('Demon')
+  expect(pressedMask(root)).toEqual(Array(16).fill(false))
+  expect(root.querySelector<HTMLButtonElement>('#load-loop')!.disabled).toBe(true)
+  expect(root.querySelector('#loop-file-status')!.textContent).toContain('Loop loaded and paused')
 })
